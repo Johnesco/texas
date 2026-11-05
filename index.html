@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Texas Votes, Raised</title>
+<meta name="description" content="Texas 2026 U.S. Senate results by county: watch the flat map rise into 3D columns sized by how many votes each county cast." />
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #151a22;
+    --line: #2a3240;
+    --text: #e8ecf2;
+    --muted: #9aa5b5;
+    --dem: #3b5bdb;
+    --rep: #d72f30;
+    --oth: #5d6c82;
+    --accent: #f2c14e;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .app { display: grid; grid-template-columns: 390px 1fr; height: 100vh; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 22px 22px 32px; }
+  main { position: relative; min-width: 0; }
+  #stage { position: absolute; inset: 0; }
+  #stage canvas { display: block; touch-action: none; }
+  h1 { font-size: 22px; line-height: 1.2; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 18px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 24px 0 10px; font-weight: 600; }
+  p { margin: 0 0 10px; }
+  b.hl { color: var(--accent); font-weight: 650; }
+  .bars { display: grid; gap: 12px; }
+  .bar-label { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .bar { display: flex; height: 22px; border-radius: 4px; overflow: hidden; font-size: 12px; font-weight: 600; }
+  .bar span { display: flex; align-items: center; padding: 0 7px; white-space: nowrap; color: #fff; overflow: hidden; }
+  .bar .d { background: var(--dem); }
+  .bar .r { background: var(--rep); justify-content: flex-end; }
+  .bar .o { background: var(--oth); padding: 0; }
+  .bar-note { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .legend { display: grid; grid-template-columns: repeat(6, 1fr); gap: 2px; font-size: 11px; color: var(--muted); text-align: center; }
+  .legend i { display: block; height: 12px; border-radius: 2px; margin-bottom: 3px; }
+  .legend-title { font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+  .controls { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; gap: 10px; align-items: center;
+    background: rgba(21,26,34,.88); border: 1px solid var(--line); border-radius: 999px; padding: 8px 10px 8px 8px; backdrop-filter: blur(6px);
+    max-width: calc(100% - 32px); }
+  button { font: inherit; font-weight: 600; color: #111; background: var(--accent); border: 0; border-radius: 999px; padding: 9px 18px; cursor: pointer; white-space: nowrap; }
+  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); padding: 8px 14px; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input[type=range] { width: 180px; accent-color: var(--accent); }
+  .hint { position: absolute; top: 14px; right: 16px; font-size: 12px; color: var(--muted); }
+  #tip { position: absolute; pointer-events: none; background: rgba(14,17,22,.95); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; font-size: 13px; min-width: 230px; display: none; z-index: 5; box-shadow: 0 6px 24px rgba(0,0,0,.4); }
+  #tip .n { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+  #tip .row { display: flex; justify-content: space-between; gap: 14px; }
+  #tip .m { color: var(--muted); }
+  .label { position: absolute; pointer-events: none; font-size: 12px; font-weight: 700; color: #fff; text-shadow: 0 1px 3px #000, 0 0 2px #000;
+    transform: translate(-50%, -120%); white-space: nowrap; opacity: 0; }
+  .label small { display: block; font-weight: 500; color: #d7dde6; text-align: center; }
+  .sources { font-size: 12.5px; color: var(--muted); }
+  .sources ol { padding-left: 18px; margin: 0 0 10px; }
+  .sources li { margin-bottom: 6px; }
+  .sources a { color: #b8c3d4; }
+  #loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 16px; }
+  @media (max-width: 820px) {
+    .app { grid-template-columns: 1fr; grid-template-rows: 62vh auto; height: auto; }
+    main { order: -1; height: 62vh; }
+    aside { border-right: 0; border-top: 1px solid var(--line); padding: 18px 16px 28px; }
+    input[type=range] { width: 90px; }
+    .hint { display: none; }
+    button { padding: 8px 12px; }
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "d3-geo": "https://cdn.jsdelivr.net/npm/d3-geo@3.1.1/+esm",
+  "topojson-client": "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/+esm"
+} }
+</script>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <h1>Why Texas looks red</h1>
+    <p class="sub" id="raceLine">2026 U.S. Senate election in Texas</p>
+
+    <p id="headline">Loading…</p>
+
+    <h2>Land vs. people</h2>
+    <div class="bars" id="bars"></div>
+
+    <h2>What you're seeing</h2>
+    <p>The flat map colors each county by who won it, no matter how many people voted there. A county where 67 votes were cast is painted just as boldly as one where 1.38 million were cast.</p>
+    <p>Press <b>Raise the counties</b> and each county becomes a column whose height is the number of votes cast there in the Senate race. Most of the red area is land where few people vote, and the tallest columns are in the cities.</p>
+    <p id="harris"></p>
+
+    <h2>Winner's share of the county vote</h2>
+    <div class="legend-title">Paxton (R) won the county</div>
+    <div class="legend" id="legR"></div>
+    <div class="legend-title">Talarico (D) won the county</div>
+    <div class="legend" id="legD"></div>
+
+    <h2>Method</h2>
+    <div class="sources" id="method"></div>
+
+    <h2>Sources</h2>
+    <div class="sources" id="sources"></div>
+  </aside>
+  <main>
+    <div id="stage"></div>
+    <div id="loading">Loading map…</div>
+    <div class="hint">Drag to orbit · scroll to zoom · hover a county</div>
+    <div id="labels"></div>
+    <div id="tip"></div>
+    <div class="controls">
+      <button id="play">Raise the counties</button>
+      <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Flat map to 3D columns" />
+      <button class="ghost" id="reset" title="Reset camera">Reset</button>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { geoConicEqualArea, geoCentroid } from 'd3-geo';
+import { feature } from 'topojson-client';
+
+const GEO_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3.0.1/counties-10m.json';
+
+// ---------- data ----------
+let res, us;
+try {
+  [res, us] = await Promise.all([
+    fetch('data/results-2026-senate.json').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }),
+    fetch(GEO_URL).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }),
+  ]);
+} catch (e) {
+  document.getElementById('loading').textContent = 'Could not load the map data. Please reload the page.';
+  throw e;
+}
+const meta = res.meta;
+const byFips = new Map(res.counties.map(c => [c.fips, c]));
+const geo = feature(us, us.objects.counties);
+const tx = { type: 'FeatureCollection', features: geo.features.filter(f => String(f.id).startsWith('48')) };
+if (tx.features.length !== 254 || !tx.features.every(f => byFips.has(String(f.id))))
+  console.error('County geometry and results do not line up', tx.features.length);
+
+// Colors: winner's share of the county vote, in 10-point bands (same convention as the reference map)
+const BINS = [40, 50, 60, 70, 80, 90];
+const REP_C = ['#ffb2b2', '#e27f7f', '#d75d5d', '#d72f30', '#c21b18', '#a80000'];
+const DEM_C = ['#a5b0ff', '#7996e2', '#6674de', '#584cde', '#3933e5', '#0d0596'];
+const shareOfWinner = c => 100 * Math.max(c.dem, c.rep) / c.total;
+function colorFor(c) {
+  const i = Math.max(0, BINS.findLastIndex(b => shareOfWinner(c) >= b));
+  return (c.dem > c.rep ? DEM_C : REP_C)[i];
+}
+const fmt = n => n.toLocaleString('en-US');
+const pct = (a, b, d = 1) => (100 * a / b).toFixed(d) + '%';
+const short = n => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'K' : String(n);
+
+// ---------- stats (all from the data file; nothing hard-coded) ----------
+const S = { dem: 0, rep: 0, lib: 0, wi: 0, tot: 0, landD: 0, landR: 0, votesInD: 0, votesInR: 0, cntD: 0, cntR: 0 };
+for (const c of res.counties) {
+  S.dem += c.dem; S.rep += c.rep; S.lib += c.lib; S.wi += c.writein; S.tot += c.total;
+  if (c.dem > c.rep) { S.landD += c.landSqMi; S.votesInD += c.total; S.cntD++; }
+  else { S.landR += c.landSqMi; S.votesInR += c.total; S.cntR++; }
+}
+const land = S.landD + S.landR;
+document.getElementById('raceLine').textContent =
+  `${meta.race} · ${meta.dem} (D), ${meta.rep} (R), ${meta.lib} (L)`;
+document.getElementById('headline').innerHTML =
+  `Paxton won <b class="hl">${S.cntR} of ${S.cntR + S.cntD}</b> counties, which cover <b class="hl">${pct(S.landR, land, 0)}</b> of Texas's land area. ` +
+  `But Talarico won the state <b class="hl">${pct(S.dem, S.tot)} to ${pct(S.rep, S.tot)}</b>, a lead of ${fmt(S.dem - S.rep)} votes.`;
+
+function bar(label, parts, note = '') {
+  return `<div><div class="bar-label">${label}</div><div class="bar">` +
+    parts.map(([cls, v, txt]) => `<span class="${cls}" style="width:${v}%">${v >= 9 ? txt : ''}</span>`).join('') +
+    `</div>${note ? `<div class="bar-note">${note}</div>` : ''}</div>`;
+}
+const lD = 100 * S.landD / land, vD = 100 * S.votesInD / S.tot;
+const sD = 100 * S.dem / S.tot, sR = 100 * S.rep / S.tot, sO = 100 - sD - sR;
+document.getElementById('bars').innerHTML =
+  bar('Land area, split by which candidate won each county', [['d', lD, lD.toFixed(0) + '% D'], ['r', 100 - lD, (100 - lD).toFixed(0) + '% R']]) +
+  bar('Votes cast, split by which candidate won each county', [['d', vD, vD.toFixed(0) + '% D'], ['r', 100 - vD, (100 - vD).toFixed(0) + '% R']]) +
+  bar('Actual statewide vote', [['d', sD, sD.toFixed(1) + '% D'], ['o', sO, ''], ['r', sR, sR.toFixed(1) + '% R']],
+    `Gray: Brown (L) and write-in candidates, ${sO.toFixed(1)}%`);
+
+const asc = [...res.counties].sort((a, b) => a.total - b.total);
+const desc = [...asc].reverse();
+const harris = desc[0];
+let acc = 0, n = 0, accLand = 0;
+while (n < asc.length && acc + asc[n].total < harris.total) { acc += asc[n].total; accLand += asc[n].landSqMi; n++; }
+const big5 = desc.slice(0, 5), big5v = big5.reduce((s, c) => s + c.total, 0);
+document.getElementById('harris').innerHTML =
+  `${harris.name} County alone cast <b class="hl">${fmt(harris.total)}</b> votes, more than the <b class="hl">${n} smallest counties combined</b> ` +
+  `(${fmt(acc)}), which together cover ${pct(accLand, land, 0)} of Texas's land area. ` +
+  `The five largest counties by votes cast (${big5.map(c => c.name).join(', ')}) cast ${pct(big5v, S.tot, 0)} of all votes.`;
+
+const legLabels = ['<50%', '50–60', '60–70', '70–80', '80–90', '90+'];
+for (const [id, cols] of [['legR', REP_C], ['legD', DEM_C]])
+  document.getElementById(id).innerHTML = cols.map((c, i) => `<div><i style="background:${c}"></i>${legLabels[i]}</div>`).join('');
+
+document.getElementById('method').innerHTML = `
+  <p><b>Votes:</b> the total votes cast in the U.S. Senate race in each county, counting every candidate including write-ins.
+  These are the Secretary of State's election-night returns as of ${meta.resultsUpdated}, ${meta.countiesNotFullyReporting.length
+    ? `with some precincts still out in ${meta.countiesNotFullyReporting.length} counties`
+    : `with all precincts reporting in all ${res.counties.length} counties`}.
+  They are unofficial until the state canvass. The county figures add up exactly to the statewide totals the Secretary of State publishes.</p>
+  <p><b>Column height</b> is proportional to votes cast (linear scale). Counties with very few votes get a thin minimum height so they stay visible.</p>
+  <p><b>Color</b> shows the county winner's share of all votes cast there, in 10-point bands. Percentages are of all votes cast, including Libertarian and write-in votes.</p>
+  <p><b>Land area</b> is the Census Bureau's land area for each county (water excluded). The shapes are drawn from the Census Bureau's 2017 simplified county boundaries.</p>
+  <p>The data file and the script that builds it are <a href="https://github.com/johnesco/texas">on GitHub</a>.</p>`;
+document.getElementById('sources').innerHTML = `<ol>
+  <li>Texas Secretary of State, <a href="${meta.resultsUrl}" target="_blank" rel="noopener">Election Night Returns, 2026 November General Election</a>, county results for U.S. Senator
+    (<a href="${meta.resultsApi}" target="_blank" rel="noopener">data feed</a>), as of ${meta.resultsUpdated}, retrieved ${meta.retrieved}.</li>
+  <li>Texas Secretary of State, <a href="https://electionresults.sos.state.tx.us/results.html" target="_blank" rel="noopener">Election Results, Tuesday, November 3, 2026</a> (statewide totals, used as a cross-check).</li>
+  <li>U.S. Census Bureau, <a href="${meta.landUrl}" target="_blank" rel="noopener">2024 Gazetteer Files</a>, counties: land area (ALAND_SQMI) and FIPS codes.</li>
+  <li>U.S. Census Bureau, <a href="https://www.census.gov/geographies/mapping-files/time-series/geo/carto-boundary-file.html" target="_blank" rel="noopener">Cartographic Boundary Files</a>, 2017 counties,
+    via <a href="https://github.com/topojson/us-atlas" target="_blank" rel="noopener">us-atlas</a> v3.0.1 (counties-10m.json).</li>
+  <li>Software: <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> r160, <a href="https://github.com/d3/d3-geo" target="_blank" rel="noopener">d3-geo</a> 3.1.1,
+    <a href="https://github.com/topojson/topojson-client" target="_blank" rel="noopener">topojson-client</a> 3.1.0.</li>
+</ol>`;
+
+// ---------- three.js scene ----------
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+stage.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#0e1116');
+const camera = new THREE.PerspectiveCamera(30, 1, 10, 20000);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(-600, 900, 700); scene.add(sun);
+
+const projection = geoConicEqualArea().parallels([27.5, 35]).rotate([99.5, 0])
+  .fitExtent([[-500, -500], [500, 500]], tx);
+const P = ([lon, lat]) => { const [x, y] = projection([lon, lat]); return new THREE.Vector2(x, -y); };
+const ringPts = ring => { const pts = ring.map(P); pts.pop(); return pts; }; // drop closing duplicate point
+
+const mapGroup = new THREE.Group();
+mapGroup.rotation.x = -Math.PI / 2; // shapes are drawn in XY and extruded along +Z, which becomes world "up"
+scene.add(mapGroup);
+
+const maxTotal = harris.total;
+const H_MAX = 420, H_FLAT = 0.8;
+const meshes = [];
+const edgeMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 });
+
+for (const f of tx.features) {
+  const c = byFips.get(String(f.id)); if (!c) continue;
+  const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+  const shapes = polys.map(([outer, ...holes]) => {
+    const s = new THREE.Shape(ringPts(outer));
+    for (const h of holes) s.holes.push(new THREE.Path(ringPts(h)));
+    return s;
+  });
+  const g = new THREE.ExtrudeGeometry(shapes, { depth: 1, bevelEnabled: false });
+  const col = new THREE.Color(colorFor(c));
+  const cap = new THREE.MeshBasicMaterial({ color: col });
+  const side = new THREE.MeshLambertMaterial({ color: col.clone().multiplyScalar(0.8) });
+  const m = new THREE.Mesh(g, [cap, side]);
+  m.add(new THREE.LineSegments(new THREE.EdgesGeometry(g, 25), edgeMat));
+  c.target = Math.max(H_FLAT, H_MAX * c.total / maxTotal);
+  c.baseColor = col;
+  const cen = P(geoCentroid(f));
+  c.cx = cen.x; c.cy = cen.y;
+  m.userData = c;
+  m.scale.z = H_FLAT;
+  mapGroup.add(m); meshes.push(m);
+}
+// rise order: smaller counties start a touch earlier, so the big cities rise last
+[...meshes].sort((a, b) => a.userData.total - b.userData.total)
+  .forEach((m, i, arr) => m.userData.delay = 0.25 * i / arr.length);
+document.getElementById('loading').remove();
+
+// labels for the largest counties
+const labelsEl = document.getElementById('labels');
+const labeled = desc.slice(0, 8).map(c => {
+  const el = document.createElement('div'); el.className = 'label';
+  el.innerHTML = `${c.name}<small>${short(c.total)} votes</small>`;
+  labelsEl.appendChild(el); return { c, el };
+});
+
+// ---------- camera / animation ----------
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.maxPolarAngle = Math.PI / 2.05; controls.enabled = false;
+controls.minDistance = 300; controls.maxDistance = 6000;
+let fitDist = 2000;
+const TOP = { phi: 0.0001, theta: 0 };
+const DEFAULT_TILT = { phi: 0.98, theta: -0.22, r: 1.08 };
+let tilt = { ...DEFAULT_TILT };
+const ease = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+const clamp01 = x => Math.min(1, Math.max(0, x));
+const playBtn = document.getElementById('play'), scrub = document.getElementById('scrub');
+
+let progress = 0;
+function applyProgress(p) {
+  progress = p;
+  const ct = ease(clamp01(p / 0.45));
+  const phi = TOP.phi + (tilt.phi - TOP.phi) * ct;
+  const theta = TOP.theta + (tilt.theta - TOP.theta) * ct;
+  const r = fitDist * (1 + (tilt.r - 1) * ct);
+  const target = new THREE.Vector3(0, 110 * ct, 0);
+  camera.position.setFromSpherical(new THREE.Spherical(r, phi, theta)).add(target);
+  camera.lookAt(target); controls.target.copy(target);
+  for (const m of meshes) {
+    const u = m.userData;
+    const k = ease(clamp01((p - 0.3 - u.delay) / 0.45));
+    m.scale.z = H_FLAT + (u.target - H_FLAT) * k;
+  }
+  scrub.value = Math.round(p * 1000);
+  playBtn.textContent = p > 0.5 ? 'Flatten' : 'Raise the counties';
+}
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+  const half = 540, t = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  fitDist = Math.max(half / t, half / (t * camera.aspect));
+  if (!controls.enabled) applyProgress(progress);
+}
+function captureTilt() { // remember where the user orbited to, so flatten/raise starts from there
+  const s = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target));
+  tilt = { phi: s.phi, theta: s.theta, r: s.radius / fitDist };
+}
+let anim = null;
+function animateTo(goal) {
+  if (controls.enabled) captureTilt();
+  controls.enabled = false;
+  anim = { from: progress, to: goal, start: performance.now(), dur: 4200 * Math.abs(goal - progress) + 1 };
+}
+playBtn.onclick = () => animateTo(progress > 0.5 ? 0 : 1);
+scrub.oninput = () => {
+  if (controls.enabled) captureTilt();
+  anim = null; controls.enabled = false;
+  applyProgress(scrub.value / 1000);
+  if (progress === 1) controls.enabled = true;
+};
+document.getElementById('reset').onclick = () => {
+  tilt = { ...DEFAULT_TILT }; anim = null; controls.enabled = false;
+  applyProgress(progress);
+  if (progress === 1) controls.enabled = true;
+};
+
+// ---------- hover ----------
+const tip = document.getElementById('tip'), ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+const HILITE = new THREE.Color('#ffffff');
+let hovered = null;
+function setHover(m) {
+  if (m === hovered) return;
+  if (hovered) hovered.material[0].color.copy(hovered.userData.baseColor);
+  hovered = m;
+  if (m) m.material[0].color.copy(m.userData.baseColor).lerp(HILITE, 0.35);
+}
+function onPointer(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  const hit = ray.intersectObjects(meshes, false)[0];
+  setHover(hit ? hit.object : null);
+  if (!hovered) { tip.style.display = 'none'; return; }
+  const c = hovered.userData, D = c.dem > c.rep, other = c.lib + c.writein;
+  tip.innerHTML = `<div class="n">${c.name} County</div>
+    <div class="row"><span>Talarico (D)</span><span>${fmt(c.dem)} · ${pct(c.dem, c.total)}</span></div>
+    <div class="row"><span>Paxton (R)</span><span>${fmt(c.rep)} · ${pct(c.rep, c.total)}</span></div>
+    <div class="row m"><span>Brown (L) + write-ins</span><span>${fmt(other)} · ${pct(other, c.total)}</span></div>
+    <div class="row m"><span>Total votes</span><span>${fmt(c.total)}</span></div>
+    <div class="row m"><span>Share of all Texas votes</span><span>${pct(c.total, S.tot, 2)}</span></div>
+    <div class="row m"><span>Land area</span><span>${fmt(Math.round(c.landSqMi))} sq mi</span></div>
+    <div class="row m"><span>Margin</span><span style="color:${D ? '#8fa8ff' : '#ff8b8b'}">${D ? 'D' : 'R'}+${(100 * Math.abs(c.dem - c.rep) / c.total).toFixed(1)} (${fmt(Math.abs(c.dem - c.rep))} votes)</span></div>`;
+  tip.style.display = 'block';
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  tip.style.left = Math.max(8, Math.min(x + 14, r.width - tip.offsetWidth - 8)) + 'px';
+  tip.style.top = Math.max(8, Math.min(y + 14, r.height - tip.offsetHeight - 8)) + 'px';
+}
+renderer.domElement.addEventListener('pointermove', onPointer);
+renderer.domElement.addEventListener('pointerdown', onPointer);
+renderer.domElement.addEventListener('pointerleave', () => { tip.style.display = 'none'; setHover(null); });
+
+// ---------- loop ----------
+const v = new THREE.Vector3();
+function frame(now) {
+  if (anim) {
+    const t = clamp01((now - anim.start) / anim.dur);
+    applyProgress(anim.from + (anim.to - anim.from) * t);
+    if (t === 1) { anim = null; if (progress === 1) controls.enabled = true; }
+  }
+  if (controls.enabled) controls.update();
+  renderer.render(scene, camera);
+  const w = stage.clientWidth, h = stage.clientHeight, k = clamp01((progress - 0.7) / 0.3);
+  const placed = [];
+  for (const { c, el } of labeled) { // largest first; hide a label that would overlap one already shown
+    v.set(c.cx, c.cy, H_FLAT + (c.target - H_FLAT) * k).applyMatrix4(mapGroup.matrixWorld).project(camera);
+    const x = (v.x + 1) / 2 * w, y = (1 - v.y) / 2 * h, bw = el.offsetWidth, bh = el.offsetHeight;
+    const box = [x - bw / 2, y - bh * 1.2, x + bw / 2, y - bh * 0.2];
+    const clash = placed.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1]);
+    if (!clash && k > 0) placed.push(box);
+    el.style.opacity = (clash || v.z >= 1) ? 0 : k;
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+  }
+  requestAnimationFrame(frame);
+}
+new ResizeObserver(resize).observe(stage);
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
