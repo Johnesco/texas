@@ -52,6 +52,9 @@
   .races { position: absolute; top: 14px; left: 16px; right: 16px; display: flex; flex-wrap: wrap; gap: 6px; z-index: 4; pointer-events: none; }
   .races button { pointer-events: auto; background: rgba(21,26,34,.88); color: var(--text); border: 1px solid var(--line); padding: 7px 14px; font-size: 14px; }
   .races button[aria-pressed="true"] { background: var(--accent); color: #111; border-color: var(--accent); }
+  .races select { pointer-events: auto; font: inherit; font-size: 14px; color: var(--text); background: rgba(21,26,34,.88); border: 1px solid var(--line);
+    border-radius: 999px; padding: 7px 12px; max-width: 100%; cursor: pointer; }
+  .races select option, .races select optgroup { background: var(--panel); color: var(--text); }
   #tip { position: absolute; pointer-events: none; background: rgba(14,17,22,.95); border: 1px solid var(--line); border-radius: 8px;
     padding: 10px 12px; font-size: 13px; min-width: 230px; display: none; z-index: 5; box-shadow: 0 6px 24px rgba(0,0,0,.4); }
   #tip .n { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
@@ -71,7 +74,8 @@
     aside { border-right: 0; border-top: 1px solid var(--line); padding: 18px 16px 28px; }
     input[type=range] { width: 90px; }
     .hint { display: none; }
-    .races button { padding: 6px 11px; font-size: 13px; }
+    .races button { display: none; }
+    .races select { width: 100%; }
     button { padding: 8px 12px; }
   }
 </style>
@@ -154,10 +158,10 @@ const tx = { type: 'FeatureCollection', features: geo.features.filter(f => Strin
 if (tx.features.length !== 254 || !tx.features.every(f => byFips.has(String(f.id))))
   console.error('County geometry and results do not line up', tx.features.length);
 
-// Races offered in the selector (the data file holds every statewide race)
+// Every statewide race in the data file is offered; these three also get one-click buttons
 const FEATURED = ['u-s-senate', 'governor', 'lieutenant-governor'];
-const races = FEATURED.map(id => res.races.find(r => r.id === id)).filter(Boolean);
-// one height scale for all offered races, so switching races compares like with like
+const races = res.races;
+// one height scale for all races, so switching races compares like with like
 const maxTotal = Math.max(...races.flatMap(r => r.counties.map(row => row[3])));
 
 // Colors: winner's share of the county vote, in 10-point bands (same convention as the reference map)
@@ -198,8 +202,9 @@ function setRace(id) {
   const minor = race.candidates.filter(c => c.party !== 'DEM' && c.party !== 'REP');
   const named = minor.filter(c => c.party !== 'W' && c.votes > 0).map(c => `${c.last} (${PARTY_SHORT[c.party] || c.party})`);
   const hasWrite = minor.some(c => c.party === 'W' && c.votes > 0);
-  otherLabel = [...named, hasWrite ? 'write-ins' : null].filter(Boolean).join(' + ') || 'Others';
-  otherLabel = otherLabel[0].toUpperCase() + otherLabel.slice(1);
+  // null when the race had only the two major-party candidates and no write-in votes
+  otherLabel = [...named, hasWrite ? 'write-ins' : null].filter(Boolean).join(' + ') || null;
+  if (otherLabel) otherLabel = otherLabel[0].toUpperCase() + otherLabel.slice(1);
 
   S = { dem: 0, rep: 0, oth: 0, tot: 0, landD: 0, landR: 0, votesInD: 0, votesInR: 0, cntD: 0, cntR: 0 };
   for (const c of counties) {
@@ -210,6 +215,7 @@ function setRace(id) {
   desc = [...counties].sort((a, b) => b.total - a.total);
 
   for (const b of document.querySelectorAll('.races button')) b.setAttribute('aria-pressed', String(b.dataset.race === race.id));
+  $('raceSelect').value = race.id;
   $('raceLine').textContent = `2026 ${race.label} election in Texas · ` +
     [D, R, ...minor.filter(c => c.party !== 'W')].map(c => `${c.name} (${PARTY_LONG[c.party] || c.party})`).join(', ');
 
@@ -226,7 +232,7 @@ function setRace(id) {
     bar('Land area, split by which candidate won each county', [['d', lD, lD.toFixed(0) + '% D'], ['r', 100 - lD, (100 - lD).toFixed(0) + '% R']]) +
     bar('Votes cast, split by which candidate won each county', [['d', vD, vD.toFixed(0) + '% D'], ['r', 100 - vD, (100 - vD).toFixed(0) + '% R']]) +
     bar('Actual statewide vote', [['d', sD, sD.toFixed(1) + '% D'], ['o', sO, ''], ['r', sR, sR.toFixed(1) + '% R']],
-      `Gray: ${otherLabel}, ${sO.toFixed(1)}%`);
+      otherLabel ? `Gray: ${otherLabel}, ${sO.toFixed(1)}%` : `Two-candidate race: the Secretary of State reports no third-party or write-in votes.`);
 
   const asc = [...desc].reverse(), big = desc[0], small = asc[0];
   $('scale').textContent =
@@ -256,8 +262,15 @@ function setRace(id) {
   if (meshes.length) restyle();
 }
 const BUTTON_LABEL = { 'lieutenant-governor': 'Lt. Governor' };
-$('races').innerHTML = races.map(r => `<button type="button" data-race="${r.id}" aria-pressed="false" aria-label="${r.label}">${BUTTON_LABEL[r.id] || r.label}</button>`).join('');
+const groups = [...new Set(races.map(r => r.group))];
+$('races').innerHTML =
+  FEATURED.map(id => races.find(r => r.id === id)).filter(Boolean)
+    .map(r => `<button type="button" data-race="${r.id}" aria-pressed="false" aria-label="${r.label}">${BUTTON_LABEL[r.id] || r.label}</button>`).join('') +
+  `<select id="raceSelect" aria-label="Choose a race">` +
+  groups.map(g => `<optgroup label="${g}">` + races.filter(r => r.group === g).map(r => `<option value="${r.id}">${r.label}</option>`).join('') + `</optgroup>`).join('') +
+  `</select>`;
 $('races').addEventListener('click', e => { const b = e.target.closest('button'); if (b && b.dataset.race !== race.id) setRace(b.dataset.race); });
+$('raceSelect').addEventListener('change', e => setRace(e.target.value));
 
 $('sources').innerHTML = `<ol>
   <li>Texas Secretary of State, <a href="${meta.resultsUrl}" target="_blank" rel="noopener">Election Night Returns, 2026 November General Election</a>, county results for statewide races
@@ -409,6 +422,7 @@ function resize() {
   renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
   const t = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
   // map spans about ±500 units; fit it inside the padded area of the flat, top-down view
+  PAD.top = Math.round(document.getElementById('races').getBoundingClientRect().height) + 26; // keep the map clear of the race selector
   const usableH = Math.max(100, h - PAD.top - PAD.bottom), usableW = Math.max(100, w - 2 * PAD.side);
   fitDist = 510 * h / (t * Math.min(usableH, usableW));
   // move the target south so the map is centered in the padded area (screen up = north = -z)
@@ -445,7 +459,7 @@ function onPointer(e) {
     <div class="row m"><span>${race.label}</span><span></span></div>
     <div class="row"><span>${D.name} (D)</span><span>${fmt(c.dem)} · ${pct(c.dem, c.total)}</span></div>
     <div class="row"><span>${R.name} (R)</span><span>${fmt(c.rep)} · ${pct(c.rep, c.total)}</span></div>
-    <div class="row m"><span>${otherLabel}</span><span>${fmt(c.other)} · ${pct(c.other, c.total)}</span></div>
+    ${otherLabel ? `<div class="row m"><span>${otherLabel}</span><span>${fmt(c.other)} · ${pct(c.other, c.total)}</span></div>` : ''}
     <div class="row m"><span>Total votes</span><span>${fmt(c.total)}</span></div>
     <div class="row m"><span>Share of all Texas votes</span><span>${pct(c.total, S.tot, 2)}</span></div>
     <div class="row m"><span>Land area</span><span>${fmt(Math.round(c.landSqMi))} sq mi</span></div>

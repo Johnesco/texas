@@ -25,19 +25,39 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / "data" / "raw"
 norm = lambda s: re.sub(r"[^A-Z]", "", s.upper())
-LABELS = {"U. S. SENATOR": "U.S. Senate", "GOVERNOR": "Governor", "LIEUTENANT GOVERNOR": "Lieutenant Governor"}
-SMALL = {"of", "the"}
+# office (as named in the SOS county feed) -> (id used in ?race= links, display label, group)
+RACES = {
+    "U. S. SENATOR": ("u-s-senate", "U.S. Senate", "Federal"),
+    "GOVERNOR": ("governor", "Governor", "State executive"),
+    "LIEUTENANT GOVERNOR": ("lieutenant-governor", "Lieutenant Governor", "State executive"),
+    "ATTORNEY GENERAL": ("attorney-general", "Attorney General", "State executive"),
+    "COMPTROLLER OF PUBLIC ACCOUNTS": ("comptroller", "Comptroller of Public Accounts", "State executive"),
+    "COMMISSIONER OF THE GENERAL LAND OFFICE": ("land-commissioner", "Commissioner of the General Land Office", "State executive"),
+    "COMMISSIONER OF AGRICULTURE": ("agriculture-commissioner", "Commissioner of Agriculture", "State executive"),
+    "RAILROAD COMMISSIONER": ("railroad-commissioner", "Railroad Commissioner", "State executive"),
+    "CHIEF JUSTICE, SUPREME COURT": ("supreme-court-chief-justice", "Supreme Court, Chief Justice", "Texas Supreme Court"),
+    "JUSTICE, SUPREME COURT, PLACE 2 - UNEXPIRED TERM": ("supreme-court-place-2", "Supreme Court, Place 2 (unexpired term)", "Texas Supreme Court"),
+    "JUSTICE, SUPREME COURT, PLACE 7": ("supreme-court-place-7", "Supreme Court, Place 7", "Texas Supreme Court"),
+    "JUSTICE, SUPREME COURT, PLACE 8": ("supreme-court-place-8", "Supreme Court, Place 8", "Texas Supreme Court"),
+    "JUDGE, COURT OF CRIMINAL APPEALS, PLACE 3": ("criminal-appeals-place-3", "Court of Criminal Appeals, Place 3", "Court of Criminal Appeals"),
+    "JUDGE, COURT OF CRIMINAL APPEALS, PLACE 4": ("criminal-appeals-place-4", "Court of Criminal Appeals, Place 4", "Court of Criminal Appeals"),
+    "JUDGE, COURT OF CRIMINAL APPEALS, PLACE 9": ("criminal-appeals-place-9", "Court of Criminal Appeals, Place 9", "Court of Criminal Appeals"),
+    "CHIEF JUSTICE, 15TH COURT OF APPEALS DISTRICT": ("fifteenth-court-chief-justice", "15th Court of Appeals, Chief Justice", "15th Court of Appeals"),
+    "JUSTICE, 15TH COURT OF APPEALS DISTRICT, PLACE 2": ("fifteenth-court-place-2", "15th Court of Appeals, Place 2", "15th Court of Appeals"),
+    "JUSTICE, 15TH COURT OF APPEALS DISTRICT, PLACE 3": ("fifteenth-court-place-3", "15th Court of Appeals, Place 3", "15th Court of Appeals"),
+}
+# Display casing the generic rule can't infer from the SOS's all-capitals names, each checked against a published source.
+NAME_FIX = {
+    "DIBIANCA": "DiBianca",  # Arthur DiBianca (L, Railroad Commissioner): https://ballotpedia.org/Arthur_DiBianca
+}
 # the statewide page names this race without the " - UNEXPIRED TERM" suffix used in the county feed
 PAGE_ALIAS = {"JUSTICE, SUPREME COURT, PLACE 2 - UNEXPIRED TERM": "JUSTICE, SUPREME COURT, PLACE 2"}
 
 
-def title(s):
-    words = s.lower().replace(" - ", " – ").split()
-    return " ".join(w if w in SMALL and i else w.capitalize() for i, w in enumerate(words))
-
-
 def cap_word(w):
     # The SOS lists names in capitals; display casing: "MCCORMICK" -> "McCormick", "ECHAVARRIA-GARZA" -> "Echavarria-Garza"
+    if w in NAME_FIX:
+        return NAME_FIX[w]
     w = w.capitalize()
     return "Mc" + w[2:].capitalize() if w.startswith("Mc") and len(w) > 3 else w
 
@@ -47,10 +67,6 @@ def person(n):
     inc = n.strip().endswith("(I)")
     n = n.replace("(I)", "").strip()
     return " ".join("-".join(cap_word(x) for x in p.split("-")) for p in n.split()), inc
-
-
-def slug(s):
-    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
 
 
 # --- Census gazetteer: FIPS, name, land area -------------------------------------------
@@ -112,13 +128,12 @@ for office in statewide:
     for (n, p), v in sorted(cand_totals.items(), key=lambda kv: -kv[1]):
         nm, inc = person(n)
         cands.append(dict(name=nm, last=nm.split()[-1], party=p, incumbent=inc, votes=v))
-    races.append(dict(
-        id=slug(LABELS.get(office, office)), office=office, label=LABELS.get(office, title(office)),
-        candidates=cands, counties=rows,
-    ))
+    rid, label, group = RACES[office]
+    races.append(dict(id=rid, office=office, label=label, group=group, candidates=cands, counties=rows))
 
-order = list(LABELS)
-races.sort(key=lambda r: (order.index(r["office"]) if r["office"] in order else 99, r["label"]))
+assert sorted(r["office"] for r in races) == sorted(RACES), "statewide races differ from the RACES table"
+order = list(RACES)
+races.sort(key=lambda r: order.index(r["office"]))
 out = dict(
     meta=dict(
         election="2026 November General Election (Nov. 3, 2026)",

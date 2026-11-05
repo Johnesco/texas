@@ -1,26 +1,38 @@
 # Why Texas looks red
 
-An interactive map of the 2026 statewide elections in Texas (Nov. 3, 2026): **U.S. Senate**, **Governor** and
-**Lieutenant Governor**. It starts as the familiar flat county map, then raises each county into a column whose
-height is the number of votes cast there. The point is to show why a map that is mostly red can still belong to a
-statewide Democratic win. A race can be linked directly, e.g. `?race=governor` or `?race=lieutenant-governor`.
+An interactive map of all 18 statewide races in the Texas general election of Nov. 3, 2026, from U.S. Senate and
+Governor to the state's high courts. It starts as the familiar flat county map, then raises each county into a column
+whose height is the number of votes cast there. The point is to show why a map that is mostly red can still belong to
+a statewide Democratic win. Each race has its own link, e.g. `?race=governor`.
 
 **Live:** https://johnesco.github.io/texas/
 
 ![The flat county map rising into 3D columns sized by votes cast](texas-2d-to-3d.gif)
 
-## Key figures (computed from the data file)
+## All races (computed from the data file)
 
-| | U.S. Senate | Governor | Lieutenant Governor |
-|---|---|---|---|
-| Democrat | James Talarico 5,444,982 (55.1%) | Gina Hinojosa 5,230,789 (52.8%) | Vikki Goodwin 5,083,581 (51.7%) |
-| Republican | Ken Paxton 4,249,373 (43.0%) | Greg Abbott 4,524,527 (45.7%) | Dan Patrick 4,484,652 (45.6%) |
-| Others + write-ins | 2.0% | 1.5% | 2.6% |
-| Total votes | 9,889,704 | 9,907,381 | 9,828,050 |
-| Counties won (R / D) | 214 / 40 | 217 / 37 | 218 / 36 |
-| Land area of counties the Republican won | 78% | 79% | 80% |
-| Votes cast in counties the Republican won | 29% | 31% | 32% |
-| Harris County votes vs. smallest counties | 1,383,480 > 208 smallest combined | 1,383,460 > 207 smallest combined | 1,375,097 > 208 smallest combined |
+| Race | Democrat | Republican | Statewide | Counties won (R / D) | Land in R-won counties |
+|---|---|---|---|---|---|
+| [U.S. Senate](https://johnesco.github.io/texas/?race=u-s-senate) | James Talarico | Ken Paxton | D 55.1% – R 43.0% | 214 / 40 | 78% |
+| [Governor](https://johnesco.github.io/texas/?race=governor) | Gina Hinojosa | Greg Abbott (inc.) | D 52.8% – R 45.7% | 217 / 37 | 79% |
+| [Lieutenant Governor](https://johnesco.github.io/texas/?race=lieutenant-governor) | Vikki Goodwin | Dan Patrick (inc.) | D 51.7% – R 45.6% | 218 / 36 | 80% |
+| [Attorney General](https://johnesco.github.io/texas/?race=attorney-general) | Nathan Johnson | Mayes Middleton | D 52.4% – R 45.9% | 218 / 36 | 80% |
+| [Comptroller of Public Accounts](https://johnesco.github.io/texas/?race=comptroller) | Sarah Eckhardt | Don Huffines | D 51.3% – R 46.2% | 220 / 34 | 80% |
+| [Commissioner of the General Land Office](https://johnesco.github.io/texas/?race=land-commissioner) | Benjamin Flores | Dawn Buckingham (inc.) | D 51.4% – R 47.0% | 219 / 35 | 79% |
+| [Commissioner of Agriculture](https://johnesco.github.io/texas/?race=agriculture-commissioner) | Clayton Tucker | Nate Sheets | D 51.3% – R 46.6% | 219 / 35 | 79% |
+| [Railroad Commissioner](https://johnesco.github.io/texas/?race=railroad-commissioner) | Jon Rosenthal | Bo French | D 52.5% – R 45.5% | 218 / 36 | 80% |
+| [Supreme Court, Chief Justice](https://johnesco.github.io/texas/?race=supreme-court-chief-justice) | Maggie Ellis | Jimmy Blacklock (inc.) | D 52.4% – R 47.6% | 219 / 35 | 80% |
+| [Supreme Court, Place 2 (unexpired term)](https://johnesco.github.io/texas/?race=supreme-court-place-2) | Chari Kelly | James P. Sullivan (inc.) | D 52.3% – R 47.7% | 220 / 34 | 80% |
+| [Supreme Court, Place 7](https://johnesco.github.io/texas/?race=supreme-court-place-7) | Kristen Hawkins | Kyle Hawkins (inc.) | D 52.8% – R 47.2% | 219 / 35 | 80% |
+| [Supreme Court, Place 8](https://johnesco.github.io/texas/?race=supreme-court-place-8) | Gisela D. Triana | Brett Busby (inc.) | D 52.0% – R 48.0% | 220 / 34 | 80% |
+| [Court of Criminal Appeals, Place 3](https://johnesco.github.io/texas/?race=criminal-appeals-place-3) | Okey Anyiam | Thomas Smith | D 50.0% – R 47.6% | 220 / 34 | 80% |
+| [Court of Criminal Appeals, Place 4](https://johnesco.github.io/texas/?race=criminal-appeals-place-4) | Audra Riley | Kevin Patrick Yeary (inc.) | D 51.7% – R 48.3% | 220 / 34 | 80% |
+| [Court of Criminal Appeals, Place 9](https://johnesco.github.io/texas/?race=criminal-appeals-place-9) | Holly Taylor | John Messinger | D 52.3% – R 47.7% | 220 / 34 | 80% |
+| [15th Court of Appeals, Chief Justice](https://johnesco.github.io/texas/?race=fifteenth-court-chief-justice) | Jerry Zimmerer | Scott Brister (inc.) | D 51.8% – R 48.2% | 220 / 34 | 80% |
+| [15th Court of Appeals, Place 2](https://johnesco.github.io/texas/?race=fifteenth-court-place-2) | Tom Baker | Scott K. Field (inc.) | D 52.0% – R 48.0% | 220 / 34 | 80% |
+| [15th Court of Appeals, Place 3](https://johnesco.github.io/texas/?race=fifteenth-court-place-3) | Marc M. Meyer | April Farris (inc.) | D 51.5% – R 48.5% | 220 / 34 | 80% |
+
+In every race the Democrat won statewide while the Republican won most counties and most of the land.
 
 ## Data and method
 
@@ -40,7 +52,7 @@ statewide Democratic win. A race can be linked directly, e.g. `?race=governor` o
 
 The raw snapshots are in [`data/raw/`](data/raw). [`scripts/build_data.py`](scripts/build_data.py) rebuilds
 [`data/results-2026.json`](data/results-2026.json) from them. That file holds all 18 races that were on the ballot in
-all 254 counties; the page currently offers U.S. Senate, Governor and Lieutenant Governor. The script stops with an
+all 254 counties, and the page offers every one of them. The script stops with an
 error unless all of these hold, for every race:
 
 - the race is reported in each of the 254 counties, with all precincts reporting
@@ -49,7 +61,7 @@ error unless all of these hold, for every race:
 - every candidate's county votes add up exactly to that candidate's total on the Secretary of State's statewide page
 
 Candidate names are listed in capitals by the Secretary of State; the script converts them to normal capitalization
-for display.
+for display (e.g. McCormick, and DiBianca as spelled by [Ballotpedia](https://ballotpedia.org/Arthur_DiBianca)).
 
 ```bash
 python scripts/build_data.py
