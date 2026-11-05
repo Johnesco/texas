@@ -132,6 +132,7 @@
 
     <h2>Sources</h2>
     <div class="sources" id="sources"></div>
+    <p class="sources">This page counts visits with <a href="https://www.goatcounter.com" target="_blank" rel="noopener">GoatCounter</a>, which uses no cookies and does not collect personal data.</p>
   </aside>
   <main>
     <div id="stage"></div>
@@ -286,8 +287,15 @@ $('races').innerHTML =
   `<select id="raceSelect" aria-label="Choose a race">` +
   groups.map(g => `<optgroup label="${g}">` + races.filter(r => r.group === g).map(r => `<option value="${r.id}">${r.label}</option>`).join('') + `</optgroup>`).join('') +
   `</select>`;
-$('races').addEventListener('click', e => { const b = e.target.closest('button'); if (b && b.dataset.race !== race.id) setRace(b.dataset.race); });
-$('raceSelect').addEventListener('change', e => setRace(e.target.value));
+// Visit counting (GoatCounter, no cookies): page views are counted by its script; race choices are sent as events.
+function gcEvent(path, title) {
+  const send = () => { try { window.goatcounter.count({ path, title, event: true }); } catch {} };
+  if (window.goatcounter && window.goatcounter.count) send();
+  else document.getElementById('gc')?.addEventListener('load', send, { once: true });
+}
+function chooseRace(id) { setRace(id); gcEvent(`race/${race.id}`, race.label); }
+$('races').addEventListener('click', e => { const b = e.target.closest('button'); if (b && b.dataset.race !== race.id) chooseRace(b.dataset.race); });
+$('raceSelect').addEventListener('change', e => chooseRace(e.target.value));
 
 $('sources').innerHTML = `<ol>
   <li>Texas Secretary of State, <a href="${meta.resultsUrl}" target="_blank" rel="noopener">Election Night Returns, 2026 November General Election</a>, county results for statewide races
@@ -328,6 +336,7 @@ let labeled = [], ready = false; // ready: camera + hover code below has been se
 
 const params = new URLSearchParams(location.search);
 setRace(params.get('race') || FEATURED[0]);
+if (params.get('race') && params.get('race') === race.id) gcEvent(`link/${race.id}`, `Arrived via link: ${race.label}`);
 
 for (const f of tx.features) {
   const c = byFips.get(String(f.id)); if (!c) continue;
@@ -530,5 +539,6 @@ updateMode();
 ready = true;
 requestAnimationFrame(frame);
 </script>
+<script id="gc" data-goatcounter="https://texaslooksred.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
 </body>
 </html>
