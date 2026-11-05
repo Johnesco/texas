@@ -268,6 +268,7 @@ for (const f of tx.features) {
   const cen = P(geoCentroid(f));
   c.cx = cen.x; c.cy = cen.y;
   m.userData = c;
+  c.mesh = m;
   m.scale.z = H_FLAT;
   mapGroup.add(m); meshes.push(m);
 }
@@ -380,7 +381,14 @@ renderer.domElement.addEventListener('pointerdown', onPointer);
 renderer.domElement.addEventListener('pointerleave', () => { tip.style.display = 'none'; setHover(null); });
 
 // ---------- loop ----------
-const v = new THREE.Vector3();
+const v = new THREE.Vector3(), labelRay = new THREE.Raycaster();
+// A label is shown only if the top of its own column is visible (not hidden behind a taller one),
+// so a label can never appear to belong to a different county's column.
+function anchorVisible(c, world) {
+  labelRay.set(camera.position, world.clone().sub(camera.position).normalize());
+  const hit = labelRay.intersectObjects(meshes, false)[0];
+  return !!hit && hit.object === c.mesh;
+}
 function frame(now) {
   if (anim) {
     const t = clamp01((now - anim.start) / anim.dur);
@@ -392,10 +400,12 @@ function frame(now) {
   const w = stage.clientWidth, h = stage.clientHeight, k = clamp01((progress - 0.7) / 0.3);
   const placed = [];
   for (const { c, el } of labeled) { // largest first; hide a label that would overlap one already shown
-    v.set(c.cx, c.cy, H_FLAT + (c.target - H_FLAT) * k).applyMatrix4(mapGroup.matrixWorld).project(camera);
+    v.set(c.cx, c.cy, c.mesh.scale.z).applyMatrix4(mapGroup.matrixWorld);
+    const hidden = k > 0 && !anchorVisible(c, v);
+    v.project(camera);
     const x = (v.x + 1) / 2 * w, y = (1 - v.y) / 2 * h, bw = el.offsetWidth, bh = el.offsetHeight;
     const box = [x - bw / 2, y - bh * 1.2, x + bw / 2, y - bh * 0.2];
-    const clash = placed.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1]);
+    const clash = hidden || placed.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1]);
     if (!clash && k > 0) placed.push(box);
     el.style.opacity = (clash || v.z >= 1) ? 0 : k;
     el.style.left = x + 'px';

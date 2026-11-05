@@ -6,6 +6,8 @@ votes cast there. The point is to show why a map that is mostly red can still be
 
 **Live:** https://johnesco.github.io/texas/
 
+![The flat county map rising into 3D columns sized by votes cast](texas-2d-to-3d.gif)
+
 ## Key figures (computed from the data file)
 
 | | |
