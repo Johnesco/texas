@@ -34,6 +34,14 @@ a statewide Democratic win. Each race has its own link, e.g. `?race=governor`.
 
 In every race the Democrat won statewide while the Republican won most counties and most of the land.
 
+## How we got there (history page)
+
+[`history.html`](https://johnesco.github.io/texas/history.html) is a separate page, linked once from the main page. It maps
+the major statewide races (President, U.S. Senate, Governor, Lieutenant Governor, Attorney General: whichever were on
+the ballot) of every Texas general election from 2008 to 2026. That makes 23 races from 2008–2024, plus the four 2026
+races. It reports each race the same way, without commentary: who won, the share and margin, the counties each candidate
+carried, and votes cast. Each race has its own link, e.g. `history.html?race=2018-u-s-senate`.
+
 ## Data and method
 
 - **Results:** Texas Secretary of State, Election Night Returns, 2026 November General Election (election id 53815),
@@ -66,6 +74,26 @@ for display (e.g. McCormick, and DiBianca as spelled by [Ballotpedia](https://ba
 ```bash
 python scripts/build_data.py
 ```
+
+### Earlier elections
+
+[`scripts/build_history.py`](scripts/build_history.py) builds [`data/results-history.json`](data/results-history.json):
+
+- **2008–2018:** Texas Secretary of State, [Election History](https://elections.sos.state.tx.us/index.htm) (official
+  canvassed results), one page per race, saved as `data/raw/sos-<year>-<race>.htm`. The script checks that each county's
+  candidate votes add up to its total, and that the counties add up to the page's statewide row.
+- **2020–2024:** Texas Secretary of State, [election results site](https://results.texas-election.com/races), final
+  county results (`static/data/election/<id>/<version>/County.json`; 2020 = 44144, 2022 = 47009, 2024 = 49664). The site
+  blocks scripted downloads, so the files were opened in a browser and the major races were extracted to
+  `data/raw/sos-enr-<year>-extract.json` (Democratic, Republican and total votes per county, plus each candidate's statewide total).
+  During extraction, every county was checked to add up and every candidate's county votes were checked against the site's
+  statewide file. The build script checks the extracts again.
+
+```bash
+python scripts/build_history.py
+```
+
+Both pages share [`style.css`](style.css) and [`app.js`](app.js); `<body data-page="now|history">` selects the page.
 
 ## Running locally
 

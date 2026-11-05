@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How We Got There</title>
+<meta name="description" content="County-by-county results of every major statewide race in Texas from 2008 to 2026: President, U.S. Senate, Governor, Lieutenant Governor and Attorney General, from the Texas Secretary of State." />
+<link rel="canonical" href="https://johnesco.github.io/texas/history.html" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Texas Votes, Raised" />
+<meta property="og:url" content="https://johnesco.github.io/texas/history.html" />
+<meta property="og:title" content="How we got there: Texas statewide races, 2008–2026" />
+<meta property="og:description" content="County results for every major statewide race in Texas since 2008, from the Texas Secretary of State. See each county rise by votes cast." />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="How we got there: Texas statewide races, 2008–2026" />
+<meta name="twitter:description" content="County results for every major statewide race in Texas since 2008, from the Texas Secretary of State." />
+<link rel="stylesheet" href="style.css" />
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "d3-geo": "https://cdn.jsdelivr.net/npm/d3-geo@3.1.1/+esm",
+  "topojson-client": "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/+esm"
+} }
+</script>
+</head>
+<body data-page="history">
+<div class="app">
+  <aside>
+    <a class="back" href="./">← Why Texas looks red (2026)</a>
+    <h1>How we got there</h1>
+    <p class="sub">Texas general elections, 2008–2026. County results for President, U.S. Senate, Governor, Lieutenant Governor
+      and Attorney General, as reported by the Texas Secretary of State.</p>
+
+    <p class="sub" id="raceLine">Loading…</p>
+    <p id="headline"></p>
+
+    <h2>Land and votes</h2>
+    <div class="bars" id="bars"></div>
+
+    <h2>Every race</h2>
+    <p class="sources">Winner's share of all votes cast, margin over the runner-up in percentage points, counties the winner carried
+      (of 254), and total votes cast. Pick a race to map it.</p>
+    <div class="table-wrap"><table class="races-table" id="table"></table></div>
+
+    <h2>What you're seeing</h2>
+    <p id="scale"></p>
+    <p id="raiseText"></p>
+    <p id="harris"></p>
+
+    <h2>Winner's share of the county vote</h2>
+    <div class="legend-title" id="legRTitle"></div>
+    <div class="legend" id="legR"></div>
+    <div class="legend-title" id="legDTitle"></div>
+    <div class="legend" id="legD"></div>
+
+    <h2>Method</h2>
+    <div class="sources" id="method"></div>
+
+    <h2>Sources</h2>
+    <div class="sources" id="sources"></div>
+    <p class="sources">This page counts visits with <a href="https://www.goatcounter.com" target="_blank" rel="noopener">GoatCounter</a>, which uses no cookies and does not collect personal data.</p>
+  </aside>
+  <main>
+    <div id="stage"></div>
+    <div id="loading">Loading map…</div>
+    <div class="races" id="races" role="group" aria-label="Choose a year and race"></div>
+    <div class="hint" id="hint">Drag to pan · scroll to zoom · hover over a county</div>
+    <div id="labels"></div>
+    <div id="tip"></div>
+    <div class="controls">
+      <button id="play">Raise the counties</button>
+      <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Flat map to 3D columns" />
+      <button class="ghost" id="reset" title="Reset camera">Reset</button>
+    </div>
+  </main>
+</div>
+
+<script type="module" src="app.js"></script>
+<script id="gc" data-goatcounter="https://texaslooksred.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
+</body>
+</html>
