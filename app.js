@@ -137,7 +137,7 @@ function setRace(id) {
     <p><b>Votes:</b> the total votes cast in the selected race in each county, counting every candidate including write-ins.
     These are the Secretary of State's election-night returns as of ${meta.resultsUpdated}, with all precincts reporting in all ${counties.length} counties.
     They are unofficial until the state canvass. For every candidate, the county figures add up exactly to the statewide totals the Secretary of State publishes.</p>
-    <p><b>Column height</b> is proportional to votes cast (linear scale, the same scale for every race). Counties with very few votes get a thin minimum height so they stay visible.</p>
+    <p><b>Column height</b> is proportional to votes cast (linear scale, the same scale for every race). Counties with very few votes get a thin minimum height so they stay visible. Each raised column is stacked by how the county voted: the runner-up's votes at the bottom in that party's color, third-party and write-in votes in gray, and the winner's votes on top in the county's color. Columns under about 1% of the tallest are too short to read as a stack and are drawn in one color.</p>
     <p><b>Color</b> shows the county winner's share of all votes cast there, in 10-point bands. Percentages are of all votes cast in the race, including third-party and write-in votes.</p>
     <p><b>Land area</b> is the Census Bureau's land area for each county (water excluded). The shapes are drawn from the Census Bureau's 2017 simplified county boundaries.</p>
     <p>The data file and the script that builds it are <a href="https://github.com/johnesco/texas">on GitHub</a>.</p>`;
@@ -188,7 +188,7 @@ function renderHistory(minor, nm) {
     Source for this race: <a href="${race.sourceUrl}" target="_blank" rel="noopener">${race.source}</a>.
     ${race.unofficial ? `These 2026 figures are election-night returns as of ${meta.resultsUpdated}, unofficial until the state canvass.` : ''}
     For every race, each county's candidate votes add up to its total, and the counties add up to the statewide totals the Secretary of State published.</p>
-    <p><b>Column height</b> is proportional to votes cast (linear scale, the same scale for every race and year). Counties with very few votes get a thin minimum height so they stay visible.</p>
+    <p><b>Column height</b> is proportional to votes cast (linear scale, the same scale for every race and year). Counties with very few votes get a thin minimum height so they stay visible. Each raised column is stacked by how the county voted: the runner-up's votes at the bottom in that party's color, third-party and write-in votes in gray, and the winner's votes on top in the county's color. Columns under about 1% of the tallest are too short to read as a stack and are drawn in one color.</p>
     <p><b>Color</b> shows which candidate carried the county and their share of all votes cast there, in 10-point bands. Percentages are of all votes cast in the race, including third-party and write-in votes.</p>
     <p><b>Land area</b> is the Census Bureau's 2024 land area for each county (water excluded). The shapes are the Census Bureau's 2017 simplified county boundaries; the same 254 counties are used for every year.</p>
     <p>The data files and the scripts that build them are <a href="https://github.com/johnesco/texas">on GitHub</a>.</p>`;
@@ -287,8 +287,43 @@ mapGroup.rotation.x = -Math.PI / 2; // shapes are drawn in XY and extruded along
 scene.add(mapGroup);
 
 const H_MAX = 420, H_FLAT = 0.8;
-const meshes = [];
-const edgeMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 });
+// A raised column is stacked by how the county voted: the runner-up's votes at the bottom, third-party and write-in
+// votes (gray) in the middle, and the winner's votes on top in the county's color. Columns shorter than SPLIT_MIN
+// (map units; the tallest column is H_MAX) are too short to read as stacks, so they stay one solid color.
+const SPLIT_MIN = 4;
+const LOSER_C = { dem: '#584cde', rep: '#d72f30' }, OTHER_C = '#5d6c82';
+const meshes = [];   // one per county: the winner's (top) segment, which is also the whole column when not stacked
+const pickables = []; // every segment of every county, for hover and label visibility tests
+// White county outlines. Each line's own opacity (the 4th color component) is multiplied by this material's.
+const edgeMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55 });
+// Outline of an extruded county (height 1): the border at the bottom and top, plus a vertical line at each corner.
+// How strong a corner line is depends on how sharply the border turns there: a turn of 90 degrees or more (a square
+// corner or sharper) is drawn fully, gentler turns fade quickly, and turns under 10 degrees get no line at all, so a
+// wiggly border such as a river doesn't streak the column with lines.
+const CORNER_MIN = 10, CORNER_FULL = 90;
+function outlineGeometry(shapes) {
+  const pos = [], col = [];
+  const line = (a, b, za, zb, alpha) => { pos.push(a.x, a.y, za, b.x, b.y, zb); col.push(1, 1, 1, alpha, 1, 1, 1, alpha); };
+  for (const shape of shapes) {
+    for (const ring of [shape.getPoints(), ...shape.holes.map(h => h.getPoints())]) {
+      const pts = ring.filter((q, i) => i === 0 || !q.equals(ring[i - 1]));
+      if (pts.length > 2 && pts[0].equals(pts.at(-1))) pts.pop();
+      const n = pts.length;
+      for (let i = 0; i < n; i++) {
+        const prev = pts[(i + n - 1) % n], cur = pts[i], next = pts[(i + 1) % n];
+        line(cur, next, 0, 0, 1); line(cur, next, 1, 1, 1);
+        const a = cur.clone().sub(prev).normalize(), b = next.clone().sub(cur).normalize();
+        const turn = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(a.dot(b), -1, 1)));
+        if (turn < CORNER_MIN) continue;
+        line(cur, cur, 0, 1, turn >= CORNER_FULL ? 1 : ((turn - CORNER_MIN) / (CORNER_FULL - CORNER_MIN)) ** 2);
+      }
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+  return geo;
+}
 const labelsEl = document.getElementById('labels');
 let labeled = [], ready = false; // ready: camera + hover code below has been set up
 
@@ -305,15 +340,34 @@ for (const f of tx.features) {
     return s;
   });
   const g = new THREE.ExtrudeGeometry(shapes, { depth: 1, bevelEnabled: false });
-  const m = new THREE.Mesh(g, [new THREE.MeshBasicMaterial(), new THREE.MeshLambertMaterial()]);
-  m.add(new THREE.LineSegments(new THREE.EdgesGeometry(g, 25), edgeMat));
+  const edges = outlineGeometry(shapes);
+  const seg = () => { // segments share the county's shape; each is scaled to its height and lifted into place
+    const m = new THREE.Mesh(g, [new THREE.MeshBasicMaterial(), new THREE.MeshLambertMaterial()]);
+    m.add(new THREE.LineSegments(edges, edgeMat));
+    m.userData = c; mapGroup.add(m); pickables.push(m);
+    return m;
+  };
   const cen = P(geoCentroid(f));
   c.cx = cen.x; c.cy = cen.y;
-  m.userData = c;
-  c.mesh = m;
-  m.scale.z = H_FLAT;
-  mapGroup.add(m); meshes.push(m);
+  c.lower = seg(); c.middle = seg(); c.mesh = seg();
+  meshes.push(c.mesh);
+  layout(c, H_FLAT);
 }
+
+// place a county's segments for a column of height h
+function layout(c, h) {
+  c.h = h;
+  if (!c.split) {
+    c.lower.visible = c.middle.visible = false;
+    c.mesh.position.z = 0; c.mesh.scale.z = h;
+    return;
+  }
+  const a = h * c.fLower, b = h * c.fMiddle;
+  c.lower.visible = a > 0; c.lower.scale.z = Math.max(a, 1e-4);
+  c.middle.visible = b > 0; c.middle.position.z = a; c.middle.scale.z = Math.max(b, 1e-4);
+  c.mesh.position.z = a + b; c.mesh.scale.z = Math.max(h - a - b, 1e-4);
+}
+const paint = (m, color) => { m.material[0].color.copy(color); m.material[1].color.copy(color).multiplyScalar(0.8); };
 
 // apply the selected race to the 3D map: colors, column heights, rise order and labels
 function restyle() {
@@ -322,8 +376,14 @@ function restyle() {
     const c = m.userData;
     c.target = Math.max(H_FLAT, H_MAX * c.total / maxTotal);
     c.baseColor = new THREE.Color(colorFor(c));
-    m.material[0].color.copy(c.baseColor);
-    m.material[1].color.copy(c.baseColor).multiplyScalar(0.8);
+    paint(m, c.baseColor);
+    const dWon = c.dem > c.rep;
+    c.split = c.target >= SPLIT_MIN;
+    c.fLower = (dWon ? c.rep : c.dem) / c.total;
+    c.fMiddle = c.other / c.total;
+    paint(c.lower, new THREE.Color(dWon ? LOSER_C.rep : LOSER_C.dem));
+    paint(c.middle, new THREE.Color(OTHER_C));
+    layout(c, c.h);
   }
   // rise order: smaller counties start a touch earlier, so the big cities rise last
   [...meshes].sort((a, b) => a.userData.total - b.userData.total)
@@ -384,7 +444,7 @@ function applyProgress(p, pose = null) {
   for (const m of meshes) {
     const u = m.userData;
     const k = ease(clamp01((p - 0.3 - u.delay) / 0.45));
-    m.scale.z = H_FLAT + (u.target - H_FLAT) * k;
+    layout(u, H_FLAT + (u.target - H_FLAT) * k);
   }
   scrub.value = Math.round(p * 1000);
   playBtn.textContent = p > 0.5 ? 'Flatten' : 'Raise the counties';
@@ -435,8 +495,8 @@ function onPointer(e) {
   const r = renderer.domElement.getBoundingClientRect();
   mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(mouse, camera);
-  const hit = ray.intersectObjects(meshes, false)[0];
-  setHover(hit ? hit.object : null);
+  const hit = ray.intersectObjects(pickables, false)[0];
+  setHover(hit ? hit.object.userData.mesh : null); // any segment selects its county
   if (!hovered) { tip.style.display = 'none'; return; }
   const c = hovered.userData, dWon = c.dem > c.rep;
   tip.innerHTML = `<div class="n">${c.name} County</div>
@@ -463,8 +523,8 @@ const v = new THREE.Vector3(), labelRay = new THREE.Raycaster();
 // so a label can never appear to belong to a different county's column.
 function anchorVisible(c, world) {
   labelRay.set(camera.position, world.clone().sub(camera.position).normalize());
-  const hit = labelRay.intersectObjects(meshes, false)[0];
-  return !!hit && hit.object === c.mesh;
+  const hit = labelRay.intersectObjects(pickables, false)[0];
+  return !!hit && hit.object.userData === c;
 }
 function frame(now) {
   if (anim) {
@@ -478,7 +538,7 @@ function frame(now) {
   const w = stage.clientWidth, h = stage.clientHeight, k = clamp01((progress - 0.7) / 0.3);
   const placed = [];
   for (const { c, el } of labeled) { // largest first; hide a label that would overlap one already shown
-    v.set(c.cx, c.cy, c.mesh.scale.z).applyMatrix4(mapGroup.matrixWorld);
+    v.set(c.cx, c.cy, c.h).applyMatrix4(mapGroup.matrixWorld);
     const hidden = k > 0 && !anchorVisible(c, v);
     v.project(camera);
     const x = (v.x + 1) / 2 * w, y = (1 - v.y) / 2 * h, bw = el.offsetWidth, bh = el.offsetHeight;
