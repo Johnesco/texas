@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Share Panels</title>
+<!-- Renders the two-panel share image ("Texas Looks Red" / "But Talarico Won"). Serve the repo root over HTTP, then
+     screenshot this page at 1802x684, e.g. with headless Edge or Chrome:
+     msedge --headless --hide-scrollbars --force-device-scale-factor=2 --window-size=1802,684 --virtual-time-budget=20000
+            --screenshot=texas-looks-red-panels-split.png http://localhost:8765/scripts/panels.html
+     Optional: ?race=<id> for another 2026 statewide race. -->
+<style>
+  :root { --bg: #0e1116; --muted: #9aa5b5; --accent: #f2c14e; --line: #3a4250; }
+  html, body { margin: 0; background: var(--bg); color: #fff; font-family: "Segoe UI", system-ui, sans-serif; }
+  .page { position: relative; width: 1802px; height: 684px; overflow: hidden; }
+  .panel { position: absolute; top: 0; width: 900px; height: 630px; }
+  .panel canvas { position: absolute; inset: 0; }
+  #left { left: 0; } #right { left: 902px; }
+  .divider { position: absolute; left: 901px; top: 24px; height: 592px; width: 1px; background: var(--line); }
+  .text { position: absolute; left: 26px; bottom: 26px; z-index: 2; }
+  h1 { font: 900 46px/1 "Segoe UI Black", "Segoe UI", sans-serif; margin: 0 0 14px; letter-spacing: -0.005em; text-shadow: 0 2px 10px #0e1116; }
+  .text p { margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; color: var(--accent); text-shadow: 0 1px 6px #0e1116; }
+  .key { display: flex; gap: 14px; margin-top: 8px; font-size: 14px; color: #d7dde6; font-weight: 500; }
+  .key i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  .label { position: absolute; z-index: 1; transform: translate(-50%, -115%); text-align: center; white-space: nowrap;
+    font-size: 12px; font-weight: 700; color: #fff; text-shadow: 0 1px 3px #000, 0 0 2px #000; }
+  .label small { display: block; font-size: 10px; font-weight: 500; color: #d7dde6; }
+  footer { position: absolute; left: 24px; bottom: 14px; font-size: 13px; color: var(--muted); }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "d3-geo": "https://cdn.jsdelivr.net/npm/d3-geo@3.1.1/+esm",
+  "topojson-client": "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/+esm"
+} }
+</script>
+</head>
+<body>
+<div class="page">
+  <div class="panel" id="left"><div class="text" id="leftText"></div></div>
+  <div class="divider"></div>
+  <div class="panel" id="right"><div class="text" id="rightText"></div></div>
+  <footer id="foot"></footer>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { GEO_URL, buildMap, layout, H_MAX, LOSER_C, OTHER_C } from '../map3d.js';
+
+const getJSON = url => fetch(url).then(r => r.json());
+const [res, us] = await Promise.all([getJSON('../data/results-2026.json'), getJSON(GEO_URL)]);
+const race = res.races.find(r => r.id === (new URLSearchParams(location.search).get('race') || 'u-s-senate'));
+const D = race.candidates.find(c => c.party === 'DEM'), R = race.candidates.find(c => c.party === 'REP');
+const pct = (a, b) => (100 * a / b).toFixed(1) + '%';
+const short = n => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : Math.round(n / 1e3) + 'K';
+// one height scale for all races, as on the main map
+const maxTotal = Math.max(...res.races.flatMap(r => r.counties.map(row => row[3])));
+
+function makeCounties() {
+  return res.counties.map((c, i) => { const [dem, rep, other, total] = race.counties[i]; return { ...c, dem, rep, other, total }; });
+}
+const base = makeCounties();
+let dem = 0, rep = 0, tot = 0, cntR = 0, landR = 0, land = 0;
+for (const c of base) { dem += c.dem; rep += c.rep; tot += c.total; land += c.landSqMi; if (c.rep >= c.dem) { cntR++; landR += c.landSqMi; } }
+const [W, L] = dem > rep ? [D, R] : [R, D];
+const label = race.label === 'U.S. Senate' ? '' : ` (${race.label})`;
+document.getElementById('leftText').innerHTML = `<h1>Texas Looks Red</h1>
+  <p>${R.last} (R) won ${cntR} of ${base.length} counties,</p><p>covering ${(100 * landR / land).toFixed(0)}% of the land.</p>`;
+document.getElementById('rightText').innerHTML = `<h1>But ${W.last} Won</h1>
+  <p>${pct(Math.max(dem, rep), tot)} to ${pct(Math.min(dem, rep), tot)} statewide.</p>
+  <p>Column height = votes cast in each county.</p>
+  <div class="key"><span><i style="background:${LOSER_C.dem}"></i>${D.last} votes</span><span><i style="background:${LOSER_C.rep}"></i>${R.last} votes</span><span><i style="background:${OTHER_C}"></i>Others</span></div>`;
+document.getElementById('foot').textContent = `2026 ${race.label} election in Texas. Data: Texas Secretary of State, unofficial returns as of ` +
+  `${res.meta.resultsUpdated.replace(' (Central)', ' CT').replace(/^0?(\d+)\/0?(\d+)\//, '$1/$2/').replace(/ 0(\d:)/, ' $1')}; U.S. Census Bureau (land area).   johnesco.github.io/texas`;
+
+function panel(el, raised, pose) {
+  const w = el.clientWidth, h = el.clientHeight;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(devicePixelRatio); renderer.setSize(w, h);
+  el.prepend(renderer.domElement);
+  const scene = new THREE.Scene(); scene.background = new THREE.Color('#0e1116');
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.1));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(-600, 900, 700); scene.add(sun);
+  const counties = makeCounties();
+  const { mapGroup, pickables } = buildMap(scene, us, counties, { maxTotal });
+  for (const c of counties) layout(c, raised ? c.target : 0.8);
+  const camera = new THREE.PerspectiveCamera(30, w / h, 10, 20000);
+  camera.setViewOffset(w, h, pose.dx || 0, pose.dy || 0, w, h);
+  camera.position.setFromSpherical(new THREE.Spherical(pose.r, pose.phi, pose.theta)).add(pose.target);
+  camera.lookAt(pose.target);
+  scene.updateMatrixWorld(true);
+  renderer.render(scene, camera);
+  if (!raised) return;
+  // label the biggest columns whose tops are visible and don't collide
+  const ray = new THREE.Raycaster(), v = new THREE.Vector3(), placed = [];
+  for (const c of [...counties].sort((a, b) => b.total - a.total).slice(0, 8)) {
+    const top = new THREE.Vector3(c.cx, c.cy, c.h).applyMatrix4(mapGroup.matrixWorld);
+    ray.set(camera.position, top.clone().sub(camera.position).normalize());
+    const hit = ray.intersectObjects(pickables, false)[0];
+    if (!hit || hit.object.userData !== c) continue;
+    v.copy(top).project(camera);
+    const x = (v.x + 1) / 2 * w, y = (1 - v.y) / 2 * h, box = [x - 40, y - 34, x + 40, y - 2];
+    if (placed.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) continue;
+    placed.push(box);
+    const lab = document.createElement('div'); lab.className = 'label';
+    lab.innerHTML = `${c.name}<small>${short(c.total)} votes</small>`;
+    lab.style.left = x + 'px'; lab.style.top = y + 'px'; el.appendChild(lab);
+  }
+}
+panel(document.getElementById('left'), false, { r: 2150, phi: 0.0001, theta: 0, target: new THREE.Vector3(0, 0, 0), dx: 0, dy: -4 });
+panel(document.getElementById('right'), true, { r: 2050, phi: 0.86, theta: -0.22, target: new THREE.Vector3(0, 110, 0), dx: 20, dy: -40 });
+document.body.classList.add('ready');
+</script>
+</body>
+</html>

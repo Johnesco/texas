@@ -42,6 +42,26 @@ the ballot) of every Texas general election from 2008 to 2026. That makes 23 rac
 races. It reports each race the same way, without commentary: who won, the share and margin, the counties each candidate
 carried, and votes cast. Each race has its own link, e.g. `history.html?race=2018-u-s-senate`.
 
+## Flythrough (story page)
+
+[`story.html`](https://johnesco.github.io/texas/story.html) is a scrolling infographic of the 2026 U.S. Senate race. The map
+stays on screen while story cards scroll past; each card flies the camera to a group of counties (the reddest Panhandle
+counties, Harris and the smallest counties, the five biggest counties, the flipped Dallas–Fort Worth suburbs, the Rio Grande
+Valley), raises or flattens the columns, and lights up the counties it talks about. Raised columns are stacked by vote, as on
+the main map. One step recolors every county by how far its margin moved from the 2024 presidential race to the 2026 Senate
+race. Every number in the cards is computed in [`story.js`](story.js) from the two data files; only the choice of counties to
+visit is written by hand. Plain HTML, CSS and JS, with the same three.js / d3-geo / topojson-client modules as the map. The
+county drawing code it uses is in [`map3d.js`](map3d.js).
+
+## Share image
+
+[`scripts/panels.html`](scripts/panels.html) draws the two-panel image "Texas Looks Red / But Talarico Won" with stacked
+columns, every figure computed from the data (`?race=<id>` for another race). With the local server running:
+
+```bash
+chrome --headless=new --hide-scrollbars --force-device-scale-factor=2 --window-size=1802,684 --virtual-time-budget=20000 --screenshot=texas-looks-red-panels-split.png http://localhost:8765/scripts/panels.html
+```
+
 ## Data and method
 
 - **Results:** Texas Secretary of State, Election Night Returns, 2026 November General Election (election id 53815),
