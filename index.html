@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Texas Votes, Raised</title>
-<meta name="description" content="Texas 2026 U.S. Senate results by county: watch the flat map rise into 3D columns sized by how many votes each county cast." />
+<meta name="description" content="Texas 2026 statewide election results by county (U.S. Senate, Governor, Lieutenant Governor): watch the flat map rise into 3D columns sized by how many votes each county cast." />
 <style>
   :root {
     --bg: #0e1116;
@@ -48,7 +48,10 @@
   button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); padding: 8px 14px; }
   button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   input[type=range] { width: 180px; accent-color: var(--accent); }
-  .hint { position: absolute; top: 14px; right: 16px; font-size: 12px; color: var(--muted); }
+  .hint { position: absolute; bottom: 76px; left: 0; right: 0; text-align: center; font-size: 12px; color: var(--muted); pointer-events: none; padding: 0 16px; }
+  .races { position: absolute; top: 14px; left: 16px; right: 16px; display: flex; flex-wrap: wrap; gap: 6px; z-index: 4; pointer-events: none; }
+  .races button { pointer-events: auto; background: rgba(21,26,34,.88); color: var(--text); border: 1px solid var(--line); padding: 7px 14px; font-size: 14px; }
+  .races button[aria-pressed="true"] { background: var(--accent); color: #111; border-color: var(--accent); }
   #tip { position: absolute; pointer-events: none; background: rgba(14,17,22,.95); border: 1px solid var(--line); border-radius: 8px;
     padding: 10px 12px; font-size: 13px; min-width: 230px; display: none; z-index: 5; box-shadow: 0 6px 24px rgba(0,0,0,.4); }
   #tip .n { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
@@ -68,6 +71,7 @@
     aside { border-right: 0; border-top: 1px solid var(--line); padding: 18px 16px 28px; }
     input[type=range] { width: 90px; }
     .hint { display: none; }
+    .races button { padding: 6px 11px; font-size: 13px; }
     button { padding: 8px 12px; }
   }
 </style>
@@ -84,7 +88,7 @@
 <div class="app">
   <aside>
     <h1>Why Texas looks red</h1>
-    <p class="sub" id="raceLine">2026 U.S. Senate election in Texas</p>
+    <p class="sub" id="raceLine">2026 statewide elections in Texas</p>
 
     <p id="headline">Loading…</p>
 
@@ -92,14 +96,14 @@
     <div class="bars" id="bars"></div>
 
     <h2>What you're seeing</h2>
-    <p>The flat map colors each county by who won it, no matter how many people voted there. A county where 67 votes were cast is painted just as boldly as one where 1.38 million were cast.</p>
-    <p>Press <b>Raise the counties</b> and each county becomes a column whose height is the number of votes cast there in the Senate race. Most of the red area is land where few people vote, and the tallest columns are in the cities.</p>
+    <p id="scale"></p>
+    <p id="raiseText"></p>
     <p id="harris"></p>
 
     <h2>Winner's share of the county vote</h2>
-    <div class="legend-title">Paxton (R) won the county</div>
+    <div class="legend-title" id="legRTitle"></div>
     <div class="legend" id="legR"></div>
-    <div class="legend-title">Talarico (D) won the county</div>
+    <div class="legend-title" id="legDTitle"></div>
     <div class="legend" id="legD"></div>
 
     <h2>Method</h2>
@@ -111,6 +115,7 @@
   <main>
     <div id="stage"></div>
     <div id="loading">Loading map…</div>
+    <div class="races" id="races" role="group" aria-label="Choose a race"></div>
     <div class="hint" id="hint">Drag to pan · scroll to zoom · hover over a county</div>
     <div id="labels"></div>
     <div id="tip"></div>
@@ -134,7 +139,7 @@ const GEO_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3.0.1/counties-10m.json';
 let res, us;
 try {
   [res, us] = await Promise.all([
-    fetch('data/results-2026-senate.json').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }),
+    fetch('data/results-2026.json').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }),
     fetch(GEO_URL).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }),
   ]);
 } catch (e) {
@@ -142,11 +147,18 @@ try {
   throw e;
 }
 const meta = res.meta;
-const byFips = new Map(res.counties.map(c => [c.fips, c]));
+const counties = res.counties; // {fips, name, landSqMi}; the selected race's vote fields are filled in by setRace()
+const byFips = new Map(counties.map(c => [c.fips, c]));
 const geo = feature(us, us.objects.counties);
 const tx = { type: 'FeatureCollection', features: geo.features.filter(f => String(f.id).startsWith('48')) };
 if (tx.features.length !== 254 || !tx.features.every(f => byFips.has(String(f.id))))
   console.error('County geometry and results do not line up', tx.features.length);
+
+// Races offered in the selector (the data file holds every statewide race)
+const FEATURED = ['u-s-senate', 'governor', 'lieutenant-governor'];
+const races = FEATURED.map(id => res.races.find(r => r.id === id)).filter(Boolean);
+// one height scale for all offered races, so switching races compares like with like
+const maxTotal = Math.max(...races.flatMap(r => r.counties.map(row => row[3])));
 
 // Colors: winner's share of the county vote, in 10-point bands (same convention as the reference map)
 const BINS = [40, 50, 60, 70, 80, 90];
@@ -160,61 +172,95 @@ function colorFor(c) {
 const fmt = n => n.toLocaleString('en-US');
 const pct = (a, b, d = 1) => (100 * a / b).toFixed(d) + '%';
 const short = n => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'K' : String(n);
-
-// ---------- stats (all from the data file; nothing hard-coded) ----------
-const S = { dem: 0, rep: 0, lib: 0, wi: 0, tot: 0, landD: 0, landR: 0, votesInD: 0, votesInR: 0, cntD: 0, cntR: 0 };
-for (const c of res.counties) {
-  S.dem += c.dem; S.rep += c.rep; S.lib += c.lib; S.wi += c.writein; S.tot += c.total;
-  if (c.dem > c.rep) { S.landD += c.landSqMi; S.votesInD += c.total; S.cntD++; }
-  else { S.landR += c.landSqMi; S.votesInR += c.total; S.cntR++; }
-}
-const land = S.landD + S.landR;
-document.getElementById('raceLine').textContent =
-  `${meta.race} · ${meta.dem} (D), ${meta.rep} (R), ${meta.lib} (L)`;
-document.getElementById('headline').innerHTML =
-  `Paxton won <b class="hl">${S.cntR} of ${S.cntR + S.cntD}</b> counties, which cover <b class="hl">${pct(S.landR, land, 0)}</b> of Texas's land area. ` +
-  `But Talarico won the state <b class="hl">${pct(S.dem, S.tot)} to ${pct(S.rep, S.tot)}</b>, a lead of ${fmt(S.dem - S.rep)} votes.`;
+const $ = id => document.getElementById(id);
+const land = counties.reduce((s, c) => s + c.landSqMi, 0);
 
 function bar(label, parts, note = '') {
   return `<div><div class="bar-label">${label}</div><div class="bar">` +
     parts.map(([cls, v, txt]) => `<span class="${cls}" style="width:${v}%">${v >= 9 ? txt : ''}</span>`).join('') +
     `</div>${note ? `<div class="bar-note">${note}</div>` : ''}</div>`;
 }
-const lD = 100 * S.landD / land, vD = 100 * S.votesInD / S.tot;
-const sD = 100 * S.dem / S.tot, sR = 100 * S.rep / S.tot, sO = 100 - sD - sR;
-document.getElementById('bars').innerHTML =
-  bar('Land area, split by which candidate won each county', [['d', lD, lD.toFixed(0) + '% D'], ['r', 100 - lD, (100 - lD).toFixed(0) + '% R']]) +
-  bar('Votes cast, split by which candidate won each county', [['d', vD, vD.toFixed(0) + '% D'], ['r', 100 - vD, (100 - vD).toFixed(0) + '% R']]) +
-  bar('Actual statewide vote', [['d', sD, sD.toFixed(1) + '% D'], ['o', sO, ''], ['r', sR, sR.toFixed(1) + '% R']],
-    `Gray: Brown (L) and write-in candidates, ${sO.toFixed(1)}%`);
-
-const asc = [...res.counties].sort((a, b) => a.total - b.total);
-const desc = [...asc].reverse();
-const harris = desc[0];
-let acc = 0, n = 0, accLand = 0;
-while (n < asc.length && acc + asc[n].total < harris.total) { acc += asc[n].total; accLand += asc[n].landSqMi; n++; }
-const big5 = desc.slice(0, 5), big5v = big5.reduce((s, c) => s + c.total, 0);
-document.getElementById('harris').innerHTML =
-  `${harris.name} County alone cast <b class="hl">${fmt(harris.total)}</b> votes, more than the <b class="hl">${n} smallest counties combined</b> ` +
-  `(${fmt(acc)}), which together cover ${pct(accLand, land, 0)} of Texas's land area. ` +
-  `The five largest counties by votes cast (${big5.map(c => c.name).join(', ')}) cast ${pct(big5v, S.tot, 0)} of all votes.`;
-
 const legLabels = ['<50%', '50–60', '60–70', '70–80', '80–90', '90+'];
 for (const [id, cols] of [['legR', REP_C], ['legD', DEM_C]])
-  document.getElementById(id).innerHTML = cols.map((c, i) => `<div><i style="background:${c}"></i>${legLabels[i]}</div>`).join('');
+  $(id).innerHTML = cols.map((c, i) => `<div><i style="background:${c}"></i>${legLabels[i]}</div>`).join('');
 
-document.getElementById('method').innerHTML = `
-  <p><b>Votes:</b> the total votes cast in the U.S. Senate race in each county, counting every candidate including write-ins.
-  These are the Secretary of State's election-night returns as of ${meta.resultsUpdated}, ${meta.countiesNotFullyReporting.length
-    ? `with some precincts still out in ${meta.countiesNotFullyReporting.length} counties`
-    : `with all precincts reporting in all ${res.counties.length} counties`}.
-  They are unofficial until the state canvass. The county figures add up exactly to the statewide totals the Secretary of State publishes.</p>
-  <p><b>Column height</b> is proportional to votes cast (linear scale). Counties with very few votes get a thin minimum height so they stay visible.</p>
-  <p><b>Color</b> shows the county winner's share of all votes cast there, in 10-point bands. Percentages are of all votes cast, including Libertarian and write-in votes.</p>
-  <p><b>Land area</b> is the Census Bureau's land area for each county (water excluded). The shapes are drawn from the Census Bureau's 2017 simplified county boundaries.</p>
-  <p>The data file and the script that builds it are <a href="https://github.com/johnesco/texas">on GitHub</a>.</p>`;
-document.getElementById('sources').innerHTML = `<ol>
-  <li>Texas Secretary of State, <a href="${meta.resultsUrl}" target="_blank" rel="noopener">Election Night Returns, 2026 November General Election</a>, county results for U.S. Senator
+// ---------- race selection: every number and name on the page comes from the selected race ----------
+// SOS party codes
+const PARTY_SHORT = { DEM: 'D', REP: 'R', L: 'L', GRE: 'G' };
+const PARTY_LONG = { DEM: 'D', REP: 'R', L: 'Libertarian', GRE: 'Green' };
+let race, S, D, R, otherLabel, desc;
+function setRace(id) {
+  race = races.find(r => r.id === id) || races[0];
+  race.counties.forEach(([dem, rep, other, total], i) => Object.assign(counties[i], { dem, rep, other, total }));
+  D = race.candidates.find(c => c.party === 'DEM');
+  R = race.candidates.find(c => c.party === 'REP');
+  const nm = c => D.last === R.last ? c.name : c.last;
+  const minor = race.candidates.filter(c => c.party !== 'DEM' && c.party !== 'REP');
+  const named = minor.filter(c => c.party !== 'W' && c.votes > 0).map(c => `${c.last} (${PARTY_SHORT[c.party] || c.party})`);
+  const hasWrite = minor.some(c => c.party === 'W' && c.votes > 0);
+  otherLabel = [...named, hasWrite ? 'write-ins' : null].filter(Boolean).join(' + ') || 'Others';
+  otherLabel = otherLabel[0].toUpperCase() + otherLabel.slice(1);
+
+  S = { dem: 0, rep: 0, oth: 0, tot: 0, landD: 0, landR: 0, votesInD: 0, votesInR: 0, cntD: 0, cntR: 0 };
+  for (const c of counties) {
+    S.dem += c.dem; S.rep += c.rep; S.oth += c.other; S.tot += c.total;
+    if (c.dem > c.rep) { S.landD += c.landSqMi; S.votesInD += c.total; S.cntD++; }
+    else { S.landR += c.landSqMi; S.votesInR += c.total; S.cntR++; }
+  }
+  desc = [...counties].sort((a, b) => b.total - a.total);
+
+  for (const b of document.querySelectorAll('.races button')) b.setAttribute('aria-pressed', String(b.dataset.race === race.id));
+  $('raceLine').textContent = `2026 ${race.label} election in Texas · ` +
+    [D, R, ...minor.filter(c => c.party !== 'W')].map(c => `${c.name} (${PARTY_LONG[c.party] || c.party})`).join(', ');
+
+  const dWonState = S.dem > S.rep, rMoreLand = S.landR > S.landD;
+  const [mapName, mapCnt, mapLand] = rMoreLand ? [nm(R), S.cntR, S.landR] : [nm(D), S.cntD, S.landD];
+  const [winName, a, b] = dWonState ? [nm(D), S.dem, S.rep] : [nm(R), S.rep, S.dem];
+  $('headline').innerHTML =
+    `${mapName} won <b class="hl">${mapCnt} of ${counties.length}</b> counties, which cover <b class="hl">${pct(mapLand, land, 0)}</b> of Texas's land area. ` +
+    `${(dWonState === rMoreLand) ? 'But' : 'And'} ${winName} won the state <b class="hl">${pct(a, S.tot)} to ${pct(b, S.tot)}</b>, a lead of ${fmt(a - b)} votes.`;
+
+  const lD = 100 * S.landD / land, vD = 100 * S.votesInD / S.tot;
+  const sD = 100 * S.dem / S.tot, sR = 100 * S.rep / S.tot, sO = 100 - sD - sR;
+  $('bars').innerHTML =
+    bar('Land area, split by which candidate won each county', [['d', lD, lD.toFixed(0) + '% D'], ['r', 100 - lD, (100 - lD).toFixed(0) + '% R']]) +
+    bar('Votes cast, split by which candidate won each county', [['d', vD, vD.toFixed(0) + '% D'], ['r', 100 - vD, (100 - vD).toFixed(0) + '% R']]) +
+    bar('Actual statewide vote', [['d', sD, sD.toFixed(1) + '% D'], ['o', sO, ''], ['r', sR, sR.toFixed(1) + '% R']],
+      `Gray: ${otherLabel}, ${sO.toFixed(1)}%`);
+
+  const asc = [...desc].reverse(), big = desc[0], small = asc[0];
+  $('scale').textContent =
+    `The flat map colors each county by who won it, no matter how many people voted there. A county where ${fmt(small.total)} votes were cast ` +
+    `(${small.name}) is painted just as boldly as one where ${(big.total / 1e6).toFixed(2)} million were cast (${big.name}).`;
+  $('raiseText').innerHTML =
+    `Press <b>Raise the counties</b> and each county becomes a column whose height is the number of votes cast there in the ${race.label} race. ` +
+    `Most of the red area is land where few people vote, and the tallest columns are in the cities.`;
+  let acc = 0, n = 0, accLand = 0;
+  while (n < asc.length && acc + asc[n].total < big.total) { acc += asc[n].total; accLand += asc[n].landSqMi; n++; }
+  const big5 = desc.slice(0, 5), big5v = big5.reduce((s, c) => s + c.total, 0);
+  $('harris').innerHTML =
+    `${big.name} County alone cast <b class="hl">${fmt(big.total)}</b> votes, more than the <b class="hl">${n} smallest counties combined</b> ` +
+    `(${fmt(acc)}), which together cover ${pct(accLand, land, 0)} of Texas's land area. ` +
+    `The five largest counties by votes cast (${big5.map(c => c.name).join(', ')}) cast ${pct(big5v, S.tot, 0)} of all votes.`;
+  $('legRTitle').textContent = `${nm(R)} (R) won the county`;
+  $('legDTitle').textContent = `${nm(D)} (D) won the county`;
+  $('method').innerHTML = `
+    <p><b>Votes:</b> the total votes cast in the selected race in each county, counting every candidate including write-ins.
+    These are the Secretary of State's election-night returns as of ${meta.resultsUpdated}, with all precincts reporting in all ${counties.length} counties.
+    They are unofficial until the state canvass. For every candidate, the county figures add up exactly to the statewide totals the Secretary of State publishes.</p>
+    <p><b>Column height</b> is proportional to votes cast (linear scale, the same scale for every race). Counties with very few votes get a thin minimum height so they stay visible.</p>
+    <p><b>Color</b> shows the county winner's share of all votes cast there, in 10-point bands. Percentages are of all votes cast in the race, including third-party and write-in votes.</p>
+    <p><b>Land area</b> is the Census Bureau's land area for each county (water excluded). The shapes are drawn from the Census Bureau's 2017 simplified county boundaries.</p>
+    <p>The data file and the script that builds it are <a href="https://github.com/johnesco/texas">on GitHub</a>.</p>`;
+  try { history.replaceState(null, '', `?race=${race.id}`); } catch {}
+  if (meshes.length) restyle();
+}
+const BUTTON_LABEL = { 'lieutenant-governor': 'Lt. Governor' };
+$('races').innerHTML = races.map(r => `<button type="button" data-race="${r.id}" aria-pressed="false" aria-label="${r.label}">${BUTTON_LABEL[r.id] || r.label}</button>`).join('');
+$('races').addEventListener('click', e => { const b = e.target.closest('button'); if (b && b.dataset.race !== race.id) setRace(b.dataset.race); });
+
+$('sources').innerHTML = `<ol>
+  <li>Texas Secretary of State, <a href="${meta.resultsUrl}" target="_blank" rel="noopener">Election Night Returns, 2026 November General Election</a>, county results for statewide races
     (<a href="${meta.resultsApi}" target="_blank" rel="noopener">data feed</a>), as of ${meta.resultsUpdated}, retrieved ${meta.retrieved}.</li>
   <li>Texas Secretary of State, <a href="https://electionresults.sos.state.tx.us/results.html" target="_blank" rel="noopener">Election Results, Tuesday, November 3, 2026</a> (statewide totals, used as a cross-check).</li>
   <li>U.S. Census Bureau, <a href="${meta.landUrl}" target="_blank" rel="noopener">2024 Gazetteer Files</a>, counties: land area (ALAND_SQMI) and FIPS codes.</li>
@@ -244,10 +290,14 @@ const mapGroup = new THREE.Group();
 mapGroup.rotation.x = -Math.PI / 2; // shapes are drawn in XY and extruded along +Z, which becomes world "up"
 scene.add(mapGroup);
 
-const maxTotal = harris.total;
 const H_MAX = 420, H_FLAT = 0.8;
 const meshes = [];
 const edgeMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55 });
+const labelsEl = document.getElementById('labels');
+let labeled = [], ready = false; // ready: camera + hover code below has been set up
+
+const params = new URLSearchParams(location.search);
+setRace(params.get('race') || FEATURED[0]);
 
 for (const f of tx.features) {
   const c = byFips.get(String(f.id)); if (!c) continue;
@@ -258,13 +308,8 @@ for (const f of tx.features) {
     return s;
   });
   const g = new THREE.ExtrudeGeometry(shapes, { depth: 1, bevelEnabled: false });
-  const col = new THREE.Color(colorFor(c));
-  const cap = new THREE.MeshBasicMaterial({ color: col });
-  const side = new THREE.MeshLambertMaterial({ color: col.clone().multiplyScalar(0.8) });
-  const m = new THREE.Mesh(g, [cap, side]);
+  const m = new THREE.Mesh(g, [new THREE.MeshBasicMaterial(), new THREE.MeshLambertMaterial()]);
   m.add(new THREE.LineSegments(new THREE.EdgesGeometry(g, 25), edgeMat));
-  c.target = Math.max(H_FLAT, H_MAX * c.total / maxTotal);
-  c.baseColor = col;
   const cen = P(geoCentroid(f));
   c.cx = cen.x; c.cy = cen.y;
   m.userData = c;
@@ -272,18 +317,30 @@ for (const f of tx.features) {
   m.scale.z = H_FLAT;
   mapGroup.add(m); meshes.push(m);
 }
-// rise order: smaller counties start a touch earlier, so the big cities rise last
-[...meshes].sort((a, b) => a.userData.total - b.userData.total)
-  .forEach((m, i, arr) => m.userData.delay = 0.25 * i / arr.length);
-document.getElementById('loading').remove();
 
-// labels for the largest counties
-const labelsEl = document.getElementById('labels');
-const labeled = desc.slice(0, 8).map(c => {
-  const el = document.createElement('div'); el.className = 'label';
-  el.innerHTML = `${c.name}<small>${short(c.total)} votes</small>`;
-  labelsEl.appendChild(el); return { c, el };
-});
+// apply the selected race to the 3D map: colors, column heights, rise order and labels
+function restyle() {
+  if (ready) setHover(null);
+  for (const m of meshes) {
+    const c = m.userData;
+    c.target = Math.max(H_FLAT, H_MAX * c.total / maxTotal);
+    c.baseColor = new THREE.Color(colorFor(c));
+    m.material[0].color.copy(c.baseColor);
+    m.material[1].color.copy(c.baseColor).multiplyScalar(0.8);
+  }
+  // rise order: smaller counties start a touch earlier, so the big cities rise last
+  [...meshes].sort((a, b) => a.userData.total - b.userData.total)
+    .forEach((m, i, arr) => m.userData.delay = 0.25 * i / arr.length);
+  labelsEl.innerHTML = '';
+  labeled = desc.slice(0, 8).map(c => {
+    const el = document.createElement('div'); el.className = 'label';
+    el.innerHTML = `${c.name}<small>${short(c.total)} votes</small>`;
+    labelsEl.appendChild(el); return { c, el };
+  });
+  if (ready && !anim) applyProgress(progress, currentPose());
+}
+restyle();
+document.getElementById('loading').remove();
 
 // ---------- camera / animation ----------
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -293,7 +350,7 @@ let fitDist = 2000, flatOffZ = 0;
 const TOP = { phi: 0.0001, theta: 0 };
 const DEFAULT_TILT = { phi: 0.98, theta: -0.22, r: 1.08 };
 // screen space kept clear of the map in the flat view: the hint at the top, the control bar at the bottom
-const PAD = { top: 44, bottom: 88, side: 16 };
+const PAD = { top: 64, bottom: 104, side: 16 };
 const ease = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 const clamp01 = x => Math.min(1, Math.max(0, x));
 const playBtn = document.getElementById('play'), scrub = document.getElementById('scrub');
@@ -383,15 +440,16 @@ function onPointer(e) {
   const hit = ray.intersectObjects(meshes, false)[0];
   setHover(hit ? hit.object : null);
   if (!hovered) { tip.style.display = 'none'; return; }
-  const c = hovered.userData, D = c.dem > c.rep, other = c.lib + c.writein;
+  const c = hovered.userData, dWon = c.dem > c.rep;
   tip.innerHTML = `<div class="n">${c.name} County</div>
-    <div class="row"><span>Talarico (D)</span><span>${fmt(c.dem)} · ${pct(c.dem, c.total)}</span></div>
-    <div class="row"><span>Paxton (R)</span><span>${fmt(c.rep)} · ${pct(c.rep, c.total)}</span></div>
-    <div class="row m"><span>Brown (L) + write-ins</span><span>${fmt(other)} · ${pct(other, c.total)}</span></div>
+    <div class="row m"><span>${race.label}</span><span></span></div>
+    <div class="row"><span>${D.name} (D)</span><span>${fmt(c.dem)} · ${pct(c.dem, c.total)}</span></div>
+    <div class="row"><span>${R.name} (R)</span><span>${fmt(c.rep)} · ${pct(c.rep, c.total)}</span></div>
+    <div class="row m"><span>${otherLabel}</span><span>${fmt(c.other)} · ${pct(c.other, c.total)}</span></div>
     <div class="row m"><span>Total votes</span><span>${fmt(c.total)}</span></div>
     <div class="row m"><span>Share of all Texas votes</span><span>${pct(c.total, S.tot, 2)}</span></div>
     <div class="row m"><span>Land area</span><span>${fmt(Math.round(c.landSqMi))} sq mi</span></div>
-    <div class="row m"><span>Margin</span><span style="color:${D ? '#8fa8ff' : '#ff8b8b'}">${D ? 'D' : 'R'}+${(100 * Math.abs(c.dem - c.rep) / c.total).toFixed(1)} (${fmt(Math.abs(c.dem - c.rep))} votes)</span></div>`;
+    <div class="row m"><span>Margin</span><span style="color:${dWon ? '#8fa8ff' : '#ff8b8b'}">${dWon ? 'D' : 'R'}+${(100 * Math.abs(c.dem - c.rep) / c.total).toFixed(1)} (${fmt(Math.abs(c.dem - c.rep))} votes)</span></div>`;
   tip.style.display = 'block';
   const x = e.clientX - r.left, y = e.clientY - r.top;
   tip.style.left = Math.max(8, Math.min(x + 14, r.width - tip.offsetWidth - 8)) + 'px';
@@ -438,6 +496,7 @@ function frame(now) {
 new ResizeObserver(resize).observe(stage);
 resize();
 updateMode();
+ready = true;
 requestAnimationFrame(frame);
 </script>
 </body>

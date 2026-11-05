@@ -1,10 +1,13 @@
-"""Build data/results-2026-senate.json from the raw source snapshots in data/raw/.
+"""Build data/results-2026.json from the raw source snapshots in data/raw/.
+
+Includes every race in the 2026 November General Election that was on the ballot in all 254
+Texas counties (the statewide races).
 
 Sources (snapshots saved in data/raw/):
   * Texas Secretary of State, Election Night Returns API, 2026 November General Election
     (election id 53815), county-level results:
     https://goelect.txelections.civixapps.com/api-ivis-system/api/s3/enr/election/countyInfo/53815
-  * Texas Secretary of State statewide results page (used only as a cross-check):
+  * Texas Secretary of State statewide results page (used as a cross-check):
     https://electionresults.sos.state.tx.us/results.html
   * U.S. Census Bureau, 2024 Gazetteer Files, counties (land area, FIPS codes):
     https://www2.census.gov/geo/docs/maps-data/data/gazetteer/2024_Gazetteer/2024_Gaz_counties_national.zip
@@ -21,8 +24,34 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / "data" / "raw"
-RACE = "U. S. SENATOR"
 norm = lambda s: re.sub(r"[^A-Z]", "", s.upper())
+LABELS = {"U. S. SENATOR": "U.S. Senate", "GOVERNOR": "Governor", "LIEUTENANT GOVERNOR": "Lieutenant Governor"}
+SMALL = {"of", "the"}
+# the statewide page names this race without the " - UNEXPIRED TERM" suffix used in the county feed
+PAGE_ALIAS = {"JUSTICE, SUPREME COURT, PLACE 2 - UNEXPIRED TERM": "JUSTICE, SUPREME COURT, PLACE 2"}
+
+
+def title(s):
+    words = s.lower().replace(" - ", " – ").split()
+    return " ".join(w if w in SMALL and i else w.capitalize() for i, w in enumerate(words))
+
+
+def cap_word(w):
+    # The SOS lists names in capitals; display casing: "MCCORMICK" -> "McCormick", "ECHAVARRIA-GARZA" -> "Echavarria-Garza"
+    w = w.capitalize()
+    return "Mc" + w[2:].capitalize() if w.startswith("Mc") and len(w) > 3 else w
+
+
+def person(n):
+    """'GREG ABBOTT (I)' -> ('Greg Abbott', True)"""
+    inc = n.strip().endswith("(I)")
+    n = n.replace("(I)", "").strip()
+    return " ".join("-".join(cap_word(x) for x in p.split("-")) for p in n.split()), inc
+
+
+def slug(s):
+    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+
 
 # --- Census gazetteer: FIPS, name, land area -------------------------------------------
 gaz = {}
@@ -36,54 +65,77 @@ assert len(gaz) == 254, len(gaz)
 # --- SOS county results ------------------------------------------------------------------
 sos = json.loads(base64.b64decode(json.loads((RAW / "sos-countyInfo-53815.json").read_text())["upload"]))
 assert len(sos) == 254, len(sos)
-counties = []
+county_list = sorted((gaz[norm(c["N"])] for c in sos.values()), key=lambda g: g["fips"])
+assert len({g["fips"] for g in county_list}) == 254
+index = {g["fips"]: i for i, g in enumerate(county_list)}
+
+seen = {}
 for c in sos.values():
-    races = [r for r in c["Races"].values() if r["N"].strip() == RACE]
-    assert len(races) == 1, (c["N"], len(races))
-    r = races[0]
-    by_party = {}
-    for cand in r["C"].values():
-        by_party[cand["P"]] = by_party.get(cand["P"], 0) + cand["V"]
-    assert sum(by_party.values()) == r["T"], c["N"]
-    assert set(by_party) <= {"DEM", "REP", "L", "W"}, by_party
-    g = gaz[norm(c["N"])]
-    counties.append(dict(
-        fips=g["fips"], name=g["name"],
-        dem=by_party.get("DEM", 0), rep=by_party.get("REP", 0),
-        lib=by_party.get("L", 0), writein=by_party.get("W", 0), total=r["T"],
-        precinctsReporting=r["PR"], precinctsTotal=r["TP"], landSqMi=g["landSqMi"],
-    ))
-counties.sort(key=lambda c: c["fips"])
-assert len({c["fips"] for c in counties}) == 254
+    for r in c["Races"].values():
+        seen.setdefault(r["N"].strip(), []).append(c["N"])
+statewide = [n for n, cs in seen.items() if len(cs) == 254]
 
-# --- Cross-check against the SOS statewide page ------------------------------------------
+# --- SOS statewide page, for the cross-check ---------------------------------------------
 page = html.unescape((RAW / "sos-results-statewide.html").read_text(encoding="utf-8"))
-block = page[page.index(RACE):]
-block = block[: block.index("U. S. REPRESENTATIVE")]
-state = {}
-for party, votes in re.findall(r'class="party">([^<]+)</td><td class="candidate">[^<]+</td><td class="ballot">([\d,]+)', block):
-    state[party] = state.get(party, 0) + int(votes.replace(",", ""))
 updated = re.search(r"Updated ([^)]+?)\s*\)", page).group(1).strip()
-sums = {
-    "REPUBLICAN": sum(c["rep"] for c in counties), "DEMOCRATIC": sum(c["dem"] for c in counties),
-    "LIBERTARIAN": sum(c["lib"] for c in counties), "WRITE-IN": sum(c["writein"] for c in counties),
-}
-assert sums == state, (sums, state)
-not_full = [c["name"] for c in counties if c["precinctsReporting"] != c["precinctsTotal"]]
+blocks = re.split(r'<div class="election">', page)[1:]
+page_totals = {}
+for b in blocks:
+    name = b[: b.index("</div>")].strip()
+    rows = re.findall(r'class="party">([^<]+)</td><td class="candidate">([^<]+)</td><td class="ballot">([\d,]+)', b.split('<div class="election">')[0])
+    page_totals.setdefault(name, {r[1].strip(): int(r[2].replace(",", "")) for r in rows})
 
+races = []
+for office in statewide:
+    rows = [None] * 254
+    cand_totals = {}
+    for c in sos.values():
+        r = next(r for r in c["Races"].values() if r["N"].strip() == office)
+        assert sum(x["V"] for x in r["C"].values()) == r["T"], (office, c["N"])
+        assert r["PR"] == r["TP"], (office, c["N"], "precincts not all reporting")
+        by = {"DEM": 0, "REP": 0}
+        for x in r["C"].values():
+            cand_totals.setdefault((x["N"].strip(), x["P"]), 0)
+            cand_totals[(x["N"].strip(), x["P"])] += x["V"]
+            if x["P"] in by:
+                by[x["P"]] += x["V"]
+        rows[index[gaz[norm(c["N"])]["fips"]]] = [by["DEM"], by["REP"], r["T"] - by["DEM"] - by["REP"], r["T"]]
+    # cross-check every candidate's statewide total against the SOS statewide page
+    ours = {n: v for (n, p), v in cand_totals.items()}
+    theirs = page_totals[PAGE_ALIAS.get(office, office)]
+    assert {norm(k): v for k, v in ours.items()} == {norm(k): v for k, v in theirs.items()}, (office, ours, theirs)
+    dems = [k for k in cand_totals if k[1] == "DEM"]
+    reps = [k for k in cand_totals if k[1] == "REP"]
+    if len(dems) != 1 or len(reps) != 1:
+        continue  # only two-party contests are mapped
+    cands = []
+    for (n, p), v in sorted(cand_totals.items(), key=lambda kv: -kv[1]):
+        nm, inc = person(n)
+        cands.append(dict(name=nm, last=nm.split()[-1], party=p, incumbent=inc, votes=v))
+    races.append(dict(
+        id=slug(LABELS.get(office, office)), office=office, label=LABELS.get(office, title(office)),
+        candidates=cands, counties=rows,
+    ))
+
+order = list(LABELS)
+races.sort(key=lambda r: (order.index(r["office"]) if r["office"] in order else 99, r["label"]))
 out = dict(
     meta=dict(
-        race="2026 U.S. Senate, Texas", dem="James Talarico", rep="Ken Paxton", lib="Ted Brown",
+        election="2026 November General Election (Nov. 3, 2026)",
         resultsSource="Texas Secretary of State, Election Night Returns (unofficial results; official canvass pending)",
         resultsUrl="https://goelect.txelections.civixapps.com/ivis-enr-ui/races",
         resultsApi="https://goelect.txelections.civixapps.com/api-ivis-system/api/s3/enr/election/countyInfo/53815",
         resultsUpdated=updated + " (Central)", retrieved="2026-11-04",
         landSource="U.S. Census Bureau, 2024 Gazetteer Files (counties), ALAND_SQMI",
         landUrl="https://www.census.gov/geographies/reference-files/time-series/geo/gazetteer-files.html",
-        countiesNotFullyReporting=not_full,
+        countyRow="counties[i] = [Democratic votes, Republican votes, all other votes, total votes] for meta.counties[i]",
     ),
-    counties=counties,
+    counties=[dict(fips=g["fips"], name=g["name"], landSqMi=g["landSqMi"]) for g in county_list],
+    races=races,
 )
-(ROOT / "data" / "results-2026-senate.json").write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
-print(f"OK: 254 counties, statewide sums match SOS page ({updated}): {sums}")
-print("Counties not at 100% precincts:", not_full or "none")
+(ROOT / "data" / "results-2026.json").write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
+print(f"OK: {len(races)} statewide races, 254 counties each, all precincts reporting; "
+      f"every candidate's total matches the SOS statewide page ({updated}).")
+for r in races:
+    d = next(c for c in r["candidates"] if c["party"] == "DEM"); p = next(c for c in r["candidates"] if c["party"] == "REP")
+    print(f"  {r['id']:55} {d['name']} {d['votes']:,} vs {p['name']}{' (inc.)' if p['incumbent'] else ''} {p['votes']:,}")
