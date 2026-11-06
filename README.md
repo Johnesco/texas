@@ -1,4 +1,4 @@
-# Why Texas looks red
+# How Texas Votes
 
 An interactive map of all 18 statewide races in the Texas general election of Nov. 3, 2026, from U.S. Senate and
 Governor to the state's high courts. It starts as the familiar flat county map, then raises each county into a column
@@ -34,6 +34,42 @@ a statewide Democratic win. Each race has its own link, e.g. `?race=governor`.
 
 In every race the Democrat won statewide while the Republican won most counties and most of the land.
 
+## U.S. House, Texas House and Texas Senate
+
+Both pages also offer the **U.S. House**, the **Texas House** and the **Texas Senate**. Districts don't follow county lines, so each county's figure is
+every district race held in it, added up by party; the sidebar compares the seats each party won with its share of the vote, and
+notes districts with no candidate from one party. Counties where every race had a single candidate (no votes reported) are gray. Texas Senate terms are staggered, so only 15 or 16
+of its 31 seats are up in most years (all 31 in 2012 and 2022, after redistricting); counties with no Senate race that year are gray too,
+and the seat count is of the seats that were up.
+
+| Year | U.S. House seats (D–R) | Texas House seats (D–R) | Texas Senate seats up (D–R) |
+|---|---|---|---|
+| 2008 | 12–20 | 74–76 | 7–8 of 15 |
+| 2010 | 9–23 | 51–99 | 5–11 of 16 |
+| 2012 | 12–24 | 55–95 | 12–19 of 31 |
+| 2014 | 11–25 | 52–98 | 3–12 of 15 |
+| 2016 | 11–25 | 55–95 | 8–8 of 16 |
+| 2018 | 13–23 | 67–83 | 5–10 of 15 |
+| 2020 | 13–23 | 67–83 | 8–8 of 16 |
+| 2022 | 13–25 | 64–86 | 12–19 of 31 |
+| 2024 | 13–25 | 62–88 | 7–8 of 15 |
+| 2026 | 14–24 | 83–67 | 5–11 of 16 |
+
+- **2026:** from the same election-night file as the statewide races; every candidate's total matches the Secretary of State's page.
+- **2008–2024:** [`data/raw/sos-house-2008-2018.json`](data/raw/sos-house-2008-2018.json),
+  [`data/raw/sos-house-2020-2024.json`](data/raw/sos-house-2020-2024.json),
+  [`data/raw/sos-senate-2008-2018.json`](data/raw/sos-senate-2008-2018.json) and
+  [`data/raw/sos-senate-2020-2024.json`](data/raw/sos-senate-2020-2024.json) were read in a web browser from the Secretary of State's
+  Election History pages (one county-by-county page per district) and its results site (the county file), and checked there:
+  every county adds up, the counties add up to each district, and each district matches the state's own summary. `build_history.py`
+  checks them again, including that every year has every district (32, 36 or 38 U.S. House; 150 Texas House; for the
+  Texas Senate, as many districts as were in that year's party primaries).
+- Districts with a single candidate are left off the November ballot in Texas (3 Texas House districts in 2010; 4 U.S. House, 58
+  Texas House and 10 Texas Senate in 2022). They count as a seat for the nominee's party, taken from the party primary results, and add no votes. In 2022 Texas Senate District 10 had nominees from both parties, but the Democrat, Beverly
+  Powell, withdrew, so it is counted for the Republican, Phil King.
+- In the 2022 results-site file, Ellis County's District 2 Senate total is twice its candidates' votes; the candidates' sum is used.
+- Some accented letters on the 2008–2018 district pages were lost in extraction; `build_history.py` restores them (José, Peña, …).
+
 ## How we got there (history page)
 
 [`history.html`](https://johnesco.github.io/texas/history.html) is a separate page, linked once from the main page. It maps
@@ -49,7 +85,8 @@ stays on screen while story cards scroll past; each card flies the camera to a g
 counties, Harris and the smallest counties, the five biggest counties, the flipped Dallas–Fort Worth suburbs, the Rio Grande
 Valley), raises or flattens the columns, and lights up the counties it talks about. Raised columns are stacked by vote, as on
 the main map. One step recolors every county by how far its margin moved from the 2024 presidential race to the 2026 Senate
-race. Every number in the cards is computed in [`story.js`](story.js) from the two data files; only the choice of counties to
+race. Two cards go down the ballot: Democrats taking the Texas House (83–67), and the U.S. House, where Democrats won
+most of the vote but 14 of 38 seats; those steps color each county by the chamber vote and show a strip of seats. Every number in the cards is computed in [`story.js`](story.js) from the two data files; only the choice of counties to
 visit is written by hand. Plain HTML, CSS and JS, with the same three.js / d3-geo / topojson-client modules as the map. The
 county drawing code it uses is in [`map3d.js`](map3d.js).
 

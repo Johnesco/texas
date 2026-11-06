@@ -1,7 +1,7 @@
 """Build data/results-2026.json from the raw source snapshots in data/raw/.
 
 Includes every race in the 2026 November General Election that was on the ballot in all 254
-Texas counties (the statewide races).
+Texas counties (the statewide races), plus the U.S. House and Texas House, every district added up by county.
 
 Sources (snapshots saved in data/raw/):
   * Texas Secretary of State, Election Night Returns API, 2026 November General Election
@@ -58,7 +58,10 @@ def cap_word(w):
     # The SOS lists names in capitals; display casing: "MCCORMICK" -> "McCormick", "ECHAVARRIA-GARZA" -> "Echavarria-Garza"
     if w in NAME_FIX:
         return NAME_FIX[w]
-    w = w.capitalize()
+    q = w[0] if w[0] in "'\"" else ""  # nicknames in quotes: "OZZIE" -> "Ozzie"
+    w = q + w[len(q):].capitalize()
+    w = re.sub(r"\.([a-z])", lambda m: "." + m.group(1).upper(), w)  # initials: J.m. -> J.M.
+    w = re.sub(r"^([OD]')([a-z])", lambda m: m.group(1) + m.group(2).upper(), w)  # O'brien -> O'Brien (not A'yonna)
     return "Mc" + w[2:].capitalize() if w.startswith("Mc") and len(w) > 3 else w
 
 
@@ -134,6 +137,70 @@ for office in statewide:
 assert sorted(r["office"] for r in races) == sorted(RACES), "statewide races differ from the RACES table"
 order = list(RACES)
 races.sort(key=lambda r: order.index(r["office"]))
+
+# --- House races: every district of a chamber, added up by county ---------------------------
+# Districts don't follow county lines, so a county's row is the sum of every district race held in it. Each row also
+# records how many districts reached into the county and in how many of them no Democrat / no Republican ran.
+HOUSES = [
+    ("U. S. REPRESENTATIVE DISTRICT ", "u-s-house", "U.S. House", "Federal"),
+    ("STATE REPRESENTATIVE DISTRICT ", "texas-house", "Texas House", "Texas Legislature"),
+    # Texas Senate terms are staggered: only some of the 31 districts are on the ballot in a given year
+    ("STATE SENATOR, DISTRICT ", "texas-senate", "Texas Senate", "Texas Legislature"),
+]
+house_races = []
+for prefix, rid, label, group in HOUSES:
+    offices = sorted((n for n in seen if n.startswith(prefix)), key=lambda n: int(n[len(prefix):]))
+    rows = [[0] * 7 for _ in range(254)]  # D, R, other, total, districts, districts with no D, districts with no R
+    districts = []
+    for office in offices:
+        cand_totals, total = {}, 0
+        in_counties = []
+        for c in sos.values():
+            r = next((r for r in c["Races"].values() if r["N"].strip() == office), None)
+            if r is None:
+                continue
+            assert sum(x["V"] for x in r["C"].values()) == r["T"], (office, c["N"])
+            assert r["PR"] == r["TP"], (office, c["N"], "precincts not all reporting")
+            in_counties.append((c, r))
+            for x in r["C"].values():
+                k = (x["N"].strip(), x["P"])
+                cand_totals[k] = cand_totals.get(k, 0) + x["V"]
+            total += r["T"]
+        # the statewide page leaves out write-in candidates who got no votes
+        ours = {norm(n): v for (n, p), v in cand_totals.items() if v}
+        theirs = {norm(k): v for k, v in page_totals[office].items() if v}
+        assert ours == theirs, (office, ours, theirs)
+        has = {p for (n, p) in cand_totals}
+        for c, r in in_counties:
+            row = rows[index[gaz[norm(c["N"])]["fips"]]]
+            dem = sum(x["V"] for x in r["C"].values() if x["P"] == "DEM")
+            rep = sum(x["V"] for x in r["C"].values() if x["P"] == "REP")
+            row[0] += dem; row[1] += rep; row[2] += r["T"] - dem - rep; row[3] += r["T"]
+            row[4] += 1; row[5] += "DEM" not in has; row[6] += "REP" not in has
+        cands = []
+        for (n, p), v in sorted(cand_totals.items(), key=lambda kv: -kv[1]):
+            nm, inc = person(n)
+            cands.append(dict(name=nm, party=p, incumbent=inc, votes=v))
+        districts.append(dict(district=int(office[len(prefix):]), total=total, counties=len(in_counties), candidates=cands))
+    # party totals stand in for candidates, so the page can treat the chamber like any other race
+    party_votes = {}
+    for d in districts:
+        for c in d["candidates"]:
+            party_votes[c["party"]] = party_votes.get(c["party"], 0) + c["votes"]
+    word = {"DEM": "Democrats", "REP": "Republicans", "L": "Libertarians", "GRE": "Greens", "IND": "Independents", "W": "Write-ins"}
+    cands = [dict(name=word.get(p, p), last=word.get(p, p), party=p, incumbent=False, votes=v)
+             for p, v in sorted(party_votes.items(), key=lambda kv: -kv[1]) if v]
+    seats = {}
+    for d in districts:
+        w = d["candidates"][0]["party"]
+        seats[w] = seats.get(w, 0) + 1
+    assert all(sum(r[3] for r in rows) == sum(d["total"] for d in districts) for _ in [0])
+    if rid != "texas-senate":
+        assert all(r[4] > 0 for r in rows), (label, "a county with no district")
+    house_races.append(dict(id=rid, office=prefix.strip().rstrip(","), label=label, group=group, chamber=True, seats=seats,
+                            size=31 if rid == "texas-senate" else len(districts),
+                            candidates=cands, districts=districts, counties=rows))
+races += house_races
 out = dict(
     meta=dict(
         election="2026 November General Election (Nov. 3, 2026)",
@@ -144,13 +211,18 @@ out = dict(
         landSource="U.S. Census Bureau, 2024 Gazetteer Files (counties), ALAND_SQMI",
         landUrl="https://www.census.gov/geographies/reference-files/time-series/geo/gazetteer-files.html",
         countyRow="counties[i] = [Democratic votes, Republican votes, all other votes, total votes] for meta.counties[i]",
+        houseRow="House races (chamber: true) add to each county row: [..., districts held in the county, "
+                 "of those with no Democratic candidate, with no Republican candidate]; districts[] holds each district's result",
     ),
     counties=[dict(fips=g["fips"], name=g["name"], landSqMi=g["landSqMi"]) for g in county_list],
     races=races,
 )
 (ROOT / "data" / "results-2026.json").write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
-print(f"OK: {len(races)} statewide races, 254 counties each, all precincts reporting; "
+print(f"OK: {len(races) - len(house_races)} statewide races and {len(house_races)} legislative chambers, all precincts reporting; "
       f"every candidate's total matches the SOS statewide page ({updated}).")
-for r in races:
+for r in house_races:
+    print(f"  {r['id']:20} {len(r['districts'])} districts, seats {r['seats']}, votes " +
+          ", ".join(f"{c['party']} {c['votes']:,}" for c in r["candidates"]))
+for r in races[: len(races) - len(house_races)]:
     d = next(c for c in r["candidates"] if c["party"] == "DEM"); p = next(c for c in r["candidates"] if c["party"] == "REP")
     print(f"  {r['id']:55} {d['name']} {d['votes']:,} vs {p['name']}{' (inc.)' if p['incumbent'] else ''} {p['votes']:,}")

@@ -11,6 +11,10 @@ Sources (snapshots saved in data/raw/):
     -> data/raw/sos-enr-<year>-extract.json. During extraction every county's candidate votes were checked to add up to
     its race total, and every candidate's county votes to add up to that candidate's total in the site's statewide file.
 
+  * U.S. House, Texas House and Texas Senate, 2008-2024: data/raw/sos-house-2008-2018.json, sos-house-2020-2024.json,
+    sos-senate-2008-2018.json and sos-senate-2020-2024.json, read in a web browser from the same two sources district by district (see the files' "note" fields), plus each year's districts that
+    had a single candidate and were left off the ballot, with the nominee from the party primary results.
+
 Counties are written in the same order as data/results-2026.json (run scripts/build_data.py first).
 
 Run:  python scripts/build_history.py
@@ -25,6 +29,16 @@ ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / "data" / "raw"
 norm = lambda s: re.sub(r"[^A-Z]", "", s.upper())
 clean = lambda s: re.sub(r"\s+", " ", s).strip()
+# Some accented letters on the Election History pages were lost (read as U+FFFD) when the district pages were extracted.
+ACCENTS = {"Pe?a": "Peña", "Mart?nez": "Martínez", "C?sar": "César", "Ar?valo": "Arévalo", "Jos?": "José",
+           "Men?ndez": "Menéndez", "Gonz?lez": "González", "Nev?rez": "Nevárez", "Mu?oz": "Muñoz", "Rub?n": "Rubén"}
+
+
+def fix_accents(name):
+    for k, v in ACCENTS.items():
+        name = name.replace(k.replace("?", "\ufffd"), v)
+    assert "\ufffd" not in name, name
+    return name
 
 # race slug -> (display label, office name in the SOS 2020-2024 county files)
 RACES = {
@@ -80,7 +94,8 @@ def cap_word(w):
 def enr_name(n):
     """'DONALD J. TRUMP/MICHAEL R. PENCE (I)' -> ('Donald J. Trump', True)"""
     inc = n.strip().endswith("(I)")
-    n = n.replace("(I)", "").split("/")[0].strip()
+    n = html.unescape(n).replace("(I)", "").split("/")[0].strip()
+    n = re.sub(r"'(\w+)\"", r'"\1"', n)  # the source's 'MANDO" -> "MANDO"
     return " ".join("-".join(cap_word(x) for x in p.split("-")) for p in n.split()), inc
 
 
@@ -149,6 +164,77 @@ for year, date in ENR.items():
                           source="Texas Secretary of State, election results (final county results)",
                           sourceUrl=x["source"]))
 
+# --- House races, 2008-2024: every district of each chamber, added up by county -------------------
+# data/raw/sos-house-2008-2018.json (Election History pages) and sos-house-2020-2024.json (results site) were read in a
+# browser, district by district; see their "note" fields. Districts with only one candidate were not on the November
+# ballot; their winners (from the party primaries) are listed under "unopposed" and count as seats with no votes.
+CHAMBERS = [("U. S. REPRESENTATIVE DISTRICT ", "u-s-house", "U.S. House", {2008: 32, 2010: 32, 2022: 38, 2024: 38}, 36),
+            ("STATE REPRESENTATIVE DISTRICT ", "texas-house", "Texas House", {}, 150),
+            ("STATE SENATOR, DISTRICT ", "texas-senate", "Texas Senate", {}, 31)]
+# The Texas Senate is staggered: only some of its 31 seats are up each year (all 31 after redistricting, in 2012 and 2022).
+# The districts up each year are the ones in that year's party primaries; the extraction checked that every one of them is
+# either on the November ballot or listed under "unopposed".
+SENATE_UP = {2008: 15, 2010: 16, 2012: 31, 2014: 15, 2016: 16, 2018: 15, 2020: 16, 2022: 31, 2024: 15}
+ORDER += [c[1] for c in CHAMBERS]
+PARTY.update({"IND": "IND", "LIB": "L"})
+DATES = {**{y: d for y, (_, d, _) in ELCHIST.items()}, **ENR}
+house_files = [json.loads((RAW / f).read_text(encoding="utf-8")) for f in ("sos-house-2008-2018.json", "sos-house-2020-2024.json", "sos-senate-2008-2018.json", "sos-senate-2020-2024.json")]
+for hf in house_files:
+    for year, yd in hf["years"].items():
+        year = int(year)
+        for prefix, slug, label, sizes, size in CHAMBERS:
+            n_seats = sizes.get(year, size)
+            if not any(x["name"].startswith(prefix) for x in yd["races"] + yd.get("unopposed", [])):
+                continue  # this file doesn't cover this chamber
+            rows = [[0] * 7 for _ in range(254)]
+            districts = []
+            for r in (x for x in yd["races"] if x["name"].startswith(prefix)):
+                k = len(r["candidates"])
+                parties = [PARTY.get(p, p) for _, p, _ in r["candidates"]]
+                sums = [0] * (k + 1)
+                for crow in r["counties"]:
+                    votes, total = crow[1:k + 1], crow[k + 1]
+                    assert sum(votes) == total, (year, r["name"], crow[0], "county row does not add up")
+                    sums = [a + b for a, b in zip(sums, votes + [total])]
+                    row = rows[name_index[norm(crow[0])]]
+                    dem = sum(v for v, p in zip(votes, parties) if p == "DEM")
+                    rep = sum(v for v, p in zip(votes, parties) if p == "REP")
+                    row[0] += dem; row[1] += rep; row[2] += total - dem - rep; row[3] += total
+                    row[4] += 1; row[5] += "DEM" not in parties; row[6] += "REP" not in parties
+                assert sums[:k] == [v for _, _, v in r["candidates"]] and sums[k] == r["total"], (year, r["name"], "counties vs district total")
+                # names: the 2008-2018 statewide summary has display names with "(I)" for incumbents; 2020-2024 are in capitals
+                if r.get("summary"):
+                    assert sorted(v for *_, v in r["summary"] if v) == sorted(v for v in sums[:k] if v), (year, r["name"])
+                    named = [(re.sub(r"\s*\(I\)", "", nm).strip(), "(I)" in nm, PARTY.get(p, p), v) for nm, p, v in r["summary"]]
+                else:
+                    named = [(*enr_name(nm), PARTY.get(p, p), v) for nm, p, v in r["candidates"]]
+                cands = [dict(name=fix_accents(clean(nm)), party=p, incumbent=inc, votes=v) for nm, inc, p, v in sorted(named, key=lambda c: -c[3]) if v or len(named) == 1]
+                districts.append(dict(district=int(r["name"][len(prefix):]), total=r["total"], counties=len(r["counties"]), candidates=cands))
+            for u in (x for x in yd.get("unopposed", []) if x["name"].startswith(prefix)):
+                nm = u["winner"]
+                nm, inc = (enr_name(nm) if nm.isupper() else (re.sub(r"\s*\(I\)", "", nm).strip(), "(I)" in nm))
+                districts.append(dict(district=int(u["name"][len(prefix):]), total=0, counties=0, unopposed=True,
+                                      candidates=[dict(name=fix_accents(clean(nm)), party=u["party"], incumbent=inc, votes=0)]))
+            districts.sort(key=lambda d: d["district"])
+            nums = [d["district"] for d in districts]
+            if slug == "texas-senate":
+                assert len(nums) == len(set(nums)) == SENATE_UP[year] and set(nums) <= set(range(1, size + 1)), (year, slug, nums)
+            else:
+                assert nums == list(range(1, n_seats + 1)), (year, slug, "districts missing or extra")
+            party_votes, seats = {}, {}
+            for d in districts:
+                for c in d["candidates"]:
+                    party_votes[c["party"]] = party_votes.get(c["party"], 0) + c["votes"]
+                seats[d["candidates"][0]["party"]] = seats.get(d["candidates"][0]["party"], 0) + 1
+            word = {"DEM": "Democrats", "REP": "Republicans", "L": "Libertarians", "GRE": "Greens", "IND": "Independents", "W": "Write-ins"}
+            cands = [dict(name=word.get(p, p), last=word.get(p, p), party=p, votes=v)
+                     for p, v in sorted(party_votes.items(), key=lambda kv: -kv[1]) if v]
+            assert sum(c["votes"] for c in cands) == sum(r[3] for r in rows)
+            races.append(dict(id=f"{year}-{slug}", year=year, date=DATES[year], label=label, chamber=True, seats=seats, size=n_seats,
+                              candidates=cands, districts=districts, counties=rows,
+                              source="Texas Secretary of State, " + ("Election History (official canvassed results)" if year <= 2018 else "election results (final county results)"),
+                              sourceUrl=yd["source"]))
+
 races.sort(key=lambda r: (r["year"], ORDER.index(r["id"].split("-", 1)[1])))
 out = dict(
     meta=dict(
@@ -160,6 +246,12 @@ out = dict(
 (ROOT / "data" / "results-history.json").write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
 print(f"OK: {len(races)} races, 254 counties each; all county and statewide checks passed.")
 for r in races:
+    if r.get("chamber"):
+        unopp = sum(1 for d in r["districts"] if d.get("unopposed"))
+        empty = sum(1 for x in r["counties"] if not x[3])
+        print(f"  {r['id']:26} seats {r['seats']}  votes " + ", ".join(f"{c['party']} {c['votes']:,}" for c in r["candidates"][:2]) +
+              f"  {unopp} unopposed off the ballot, {empty} counties with no contested race")
+        continue
     d = next(c for c in r["candidates"] if c["party"] == "DEM"); p = next(c for c in r["candidates"] if c["party"] == "REP")
     tot = sum(x[3] for x in r["counties"]); won = sum(1 for x in r["counties"] if x[1] > x[0])
     print(f"  {r['id']:26} {d['name']:24} {100*d['votes']/tot:5.1f}%  {p['name']:18} {100*p['votes']/tot:5.1f}%  R won {won:3} counties  {tot:>10,} votes")

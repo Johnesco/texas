@@ -57,6 +57,39 @@ const movedD = counties.filter(c => c.shift > 0).length;
 const medianShift = byShift[Math.floor(byShift.length / 2)].shift;
 const flipVotes = flipped.reduce((s, c) => s + c.total, 0);
 
+// Down the ballot: the Texas House and the U.S. House, every district added up by county (same county order).
+function chamber(id) {
+  const r = res.races.find(x => x.id === id), p = hist.races.find(x => x.id === `2024-${id}`);
+  const before = new Map(p.districts.map(d => [d.district, d.candidates[0].party]));
+  const dist = r.districts.map(d => {
+    const [a, b] = d.candidates;
+    return { ...d, w: a, m: b ? 100 * (a.votes - b.votes) / d.total : 100, before: before.get(d.district) };
+  });
+  const row = ([dem, rep, other, total]) => ({ dem, rep, other, total });
+  const sum = k => r.counties.reduce((s, x) => s + x[k], 0);
+  return { r, label: r.label, rows: r.counties.map(row), rows0: p.counties.map(row), dist, n: dist.length,
+    dem: sum(0), rep: sum(1), tot: sum(3), seatD: r.seats.DEM || 0, seatR: r.seats.REP || 0, seatD0: p.seats.DEM || 0,
+    gainD: dist.filter(d => d.before === 'REP' && d.w.party === 'DEM'), gainR: dist.filter(d => d.before === 'DEM' && d.w.party === 'REP') };
+}
+const TXH = chamber('texas-house'), USH = chamber('u-s-house');
+counties.forEach((c, i) => c.i = i);
+// counties whose Texas House vote (all districts added up) went from a Republican lead in 2024 to a Democratic one
+const txhFlipped = counties.filter(c => { const a = TXH.rows0[c.i], b = TXH.rows[c.i]; return a.rep > a.dem && b.dem > b.rep; })
+  .sort((a, b) => TXH.rows[b.i].total - TXH.rows[a.i].total);
+const txhClose = TXH.gainD.filter(d => d.m < 2);
+// ticket-splitting: counties the Senate Democrat won where Republicans got more U.S. House votes, and the reverse
+const splitR = counties.filter(c => c.dem > c.rep && USH.rows[c.i].rep > USH.rows[c.i].dem);
+const splitD = counties.filter(c => c.rep > c.dem && USH.rows[c.i].dem > USH.rows[c.i].rep);
+const cm = (row, d = 0) => mg(100 * (row.dem - row.rep) / row.total, d);
+// a strip of seats: Democratic holds, Democratic gains, Republican gains, Republican holds
+const seatStrip = ch => {
+  const cell = (cls, k) => `<i class="${cls}"></i>`.repeat(k);
+  return `<div class="seats" role="img" aria-label="${ch.seatD} Democratic and ${ch.seatR} Republican seats">` +
+    cell('d', ch.seatD - ch.gainD.length) + cell('d f', ch.gainD.length) + cell('r f', ch.gainR.length) + cell('r', ch.seatR - ch.gainR.length) +
+    `</div><div class="seats-key"><span><i class="d"></i>${ch.seatD} D</span><span><i class="r"></i>${ch.seatR} R</span><span><i class="d f"></i>changed party since 2024</span></div>`;
+};
+const distList = ds => list(ds.map(d => `District ${d.district} (${d.w.name}, by ${d.m.toFixed(1)} points)`));
+
 // Colors: winner's share in 10-point bands (map3d.js, as on the main map); shift toward a party in 10-point bands.
 const SHIFT_BINS = [0, 10, 20, 30, 40, 50];
 const SHIFT_D = ['#3d3a52', '#4f4a8a', '#5f59c0', '#7b7bf0', '#a9a6ff', '#e0ddff'];
@@ -115,6 +148,25 @@ const STEPS = [
     <p>Here each county is colored by how far its margin moved from the 2024 presidential race to the 2026 Senate race. The median county moved <b class="hl">${medianShift.toFixed(0)} points</b>.</p>
     <p>The biggest move was in ${byShift[0].name} County (${byShift[0].shift.toFixed(0)} points). The smallest was in ${byShift.at(-1).name} County (${byShift.at(-1).shift.toFixed(0)}), which ${R.last} still won ${mg(byShift.at(-1).m)}.</p>
     <p>${flipped.length} counties flipped from Trump to ${D.last}. They cast ${pct(flipVotes, S.tot)} of the state's votes.</p>` },
+  { view: 'state', raise: 0, phi: 0.45, theta: 0.15, color: TXH, hi: txhFlipped, labels: txhFlipped.slice(0, 6), label: c => `House vote ${cm(TXH.rows0[c.i])} → ${cm(TXH.rows[c.i])}`, card: () => `
+    <div class="kicker">Down the ballot · Texas House</div>
+    <h2>Democrats took the Texas House</h2>
+    <p>Democrats won <b class="hl">${TXH.seatD} of ${TXH.n}</b> seats, up from ${TXH.seatD0} in 2024. They gained ${TXH.gainD.length} districts${TXH.gainR.length ? ` and lost ${TXH.gainR.length}` : ' and lost none'},
+      and won ${pct(TXH.dem, TXH.tot, 1)} of the Texas House vote.</p>
+    ${seatStrip(TXH)}
+    <div class="big">${txhClose.length} of ${TXH.gainD.length}<small>Democratic gains were won by less than 2 points</small></div>
+    <p>Here each county is colored by which party got more Texas House votes there, every district added up. The ${txhFlipped.length} lit-up counties
+      went from a Republican lead in 2024 to a Democratic one.</p>
+    <p class="note">Republicans had held the Texas House since the 2002 election. Seats and votes: Texas Secretary of State, 2026 election-night returns and 2024 final results.</p>` },
+  { view: 'state', raise: 0, phi: 0.45, theta: -0.15, color: USH, hi: splitR, labels: splitR, label: c => `Senate ${mg(c.m)} · House ${cm(USH.rows[c.i])}`, card: () => `
+    <div class="kicker">Down the ballot · U.S. House</div>
+    <h2>More votes, fewer seats</h2>
+    <p>Democrats won <b class="hl">${pct(USH.dem, USH.tot, 1)}</b> of the U.S. House vote in Texas, but <b class="hl">${USH.seatD} of the ${USH.n}</b> seats (${pct(USH.seatD, USH.n)}).</p>
+    ${seatStrip(USH)}
+    <p>They gained ${distList(USH.gainD)}${USH.gainR.length ? `, and lost ${distList(USH.gainR)}` : ''}.</p>
+    <p>That gap doesn't come from empty land: districts have equal populations. It comes from where the district lines fall.</p>
+    <p>Few voters split their tickets. ${D.last} won only ${splitR.length} counties where Republicans got more U.S. House votes (${list(splitR.map(c => c.name))}, lit up),
+      and ${splitD.length ? `${splitD.length} went the other way` : 'none went the other way'}.</p>` },
   { view: 'state', raise: 1, phi: 1.0, theta: 0.6, zoom: 1.1, spin: true, color: 'winner', hi: null, labels: desc.slice(0, 6), label: vs, card: () => `
     <div class="kicker">The whole picture</div>
     <h2>Most of the map, fewer of the votes</h2>
@@ -217,7 +269,7 @@ function setStep(i) {
   const hi = s.hi ? new Set(s.hi) : null;
   for (const c of counties) {
     c.litGoal = !hi || hi.has(c) ? 1 : 0;
-    c.colorGoal = new THREE.Color(s.color === 'shift' ? shiftColor(c) : winnerColor(c));
+    c.colorGoal = new THREE.Color(s.color === 'shift' ? shiftColor(c) : s.color.rows ? winnerColor(s.color.rows[c.i]) : winnerColor(c));
   }
   labelsEl.innerHTML = '';
   labelSet = s.labels.map(c => {
@@ -230,6 +282,9 @@ function setStep(i) {
   $('key').innerHTML = s.color === 'shift'
     ? `<div class="legend-title">Shift toward ${D.last} (D), 2024 President → 2026 Senate, points</div>
        <div class="legend">${SHIFT_D.map((c, j) => `<div><i style="background:${c}"></i>${j === 5 ? '50+' : `${SHIFT_BINS[j]}–${SHIFT_BINS[j + 1]}`}</div>`).join('')}</div>`
+    : s.color.rows
+    ? `<div class="legend-title">Republicans got more ${s.color.label} votes · share of county vote</div>${row(REP_C)}
+       <div class="legend-title">Democrats got more</div>${row(DEM_C)}`
     : `<div class="legend-title">${R.last} (R) won · share of county vote</div>${row(REP_C)}
        <div class="legend-title">${D.last} (D) won</div>${row(DEM_C)}` +
       (s.raise ? `<div class="legend-title">Columns are split by vote</div><div class="split-key">
@@ -254,7 +309,10 @@ renderer.domElement.addEventListener('pointermove', e => {
     <div class="row m"><span>Total votes</span><span>${fmt(c.total)}</span></div>
     <div class="row m"><span>2026 Senate margin</span><span style="color:${c.m > 0 ? '#8fa8ff' : '#ff8b8b'}">${mg(c.m, 1)}</span></div>
     <div class="row m"><span>2024 President margin</span><span style="color:${c.m0 > 0 ? '#8fa8ff' : '#ff8b8b'}">${mg(c.m0, 1)}</span></div>
-    <div class="row m"><span>Land area</span><span>${fmt(Math.round(c.landSqMi))} sq mi</span></div>`;
+    <div class="row m"><span>Land area</span><span>${fmt(Math.round(c.landSqMi))} sq mi</span></div>` +
+    (STEPS[curStep].color.rows ? (() => { const ch = STEPS[curStep].color, h = ch.rows[c.i], h0 = ch.rows0[c.i];
+      return `<div class="row m"><span>2026 ${ch.label}, all districts here</span><span style="color:${h.dem > h.rep ? '#8fa8ff' : '#ff8b8b'}">${cm(h, 1)}</span></div>` +
+        (h0.total ? `<div class="row m"><span>2024 ${ch.label}</span><span style="color:${h0.dem > h0.rep ? '#8fa8ff' : '#ff8b8b'}">${cm(h0, 1)}</span></div>` : ''); })() : '');
   tip.style.display = 'block';
   const x = e.clientX - r.left, y = e.clientY - r.top;
   tip.style.left = Math.max(8, Math.min(x + 14, r.width - tip.offsetWidth - 8)) + 'px';

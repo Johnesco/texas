@@ -34,7 +34,7 @@ if (tx.features.length !== 254 || !tx.features.every(f => byFips.has(String(f.id
 // History page: the major statewide races (President, U.S. Senate, Governor, Lt. Governor, Attorney General) of every
 // general election since 2008, ending with 2026; each year gets a button.
 const FEATURED = ['u-s-senate', 'governor', 'lieutenant-governor'];
-const MAJOR = ['president', 'u-s-senate', 'governor', 'lieutenant-governor', 'attorney-general'];
+const MAJOR = ['president', 'u-s-senate', 'governor', 'lieutenant-governor', 'attorney-general', 'u-s-house', 'texas-house', 'texas-senate'];
 const races = !HIST ? res.races.map(r => ({ ...r, year: 2026 })) : [
   ...hist.races,
   ...res.races.filter(r => MAJOR.includes(r.id)).map(r => ({ ...r, id: `2026-${r.id}`, year: 2026, date: 'Nov. 3, 2026', unofficial: true,
@@ -50,7 +50,10 @@ const BINS = [40, 50, 60, 70, 80, 90];
 const REP_C = ['#ffb2b2', '#e27f7f', '#d75d5d', '#d72f30', '#c21b18', '#a80000'];
 const DEM_C = ['#a5b0ff', '#7996e2', '#6674de', '#584cde', '#3933e5', '#0d0596'];
 const shareOfWinner = c => 100 * Math.max(c.dem, c.rep) / c.total;
+// House races only: a county where no district race had votes reported (every race there was unopposed) is gray
+const NO_RACE_C = '#3b4352';
 function colorFor(c) {
+  if (!c.total) return NO_RACE_C;
   const i = Math.max(0, BINS.findLastIndex(b => shareOfWinner(c) >= b));
   return (c.dem > c.rep ? DEM_C : REP_C)[i];
 }
@@ -76,7 +79,9 @@ const PARTY_LONG = { DEM: 'D', REP: 'R', L: 'Libertarian', GRE: 'Green' };
 let race, S, D, R, otherLabel, desc;
 function setRace(id) {
   race = races.find(r => r.id === id) || races[0];
-  race.counties.forEach(([dem, rep, other, total], i) => Object.assign(counties[i], { dem, rep, other, total }));
+  // House races add [districts in the county, of those with no Democrat, with no Republican] to each row
+  race.counties.forEach(([dem, rep, other, total, districts = 0, noD = 0, noR = 0], i) =>
+    Object.assign(counties[i], { dem, rep, other, total, districts, noD, noR }));
   D = race.candidates.find(c => c.party === 'DEM');
   R = race.candidates.find(c => c.party === 'REP');
   const nm = c => D.last === R.last ? c.name : c.last;
@@ -87,9 +92,10 @@ function setRace(id) {
   otherLabel = [...named, hasWrite ? 'write-ins' : null].filter(Boolean).join(' + ') || null;
   if (otherLabel) otherLabel = otherLabel[0].toUpperCase() + otherLabel.slice(1);
 
-  S = { dem: 0, rep: 0, oth: 0, tot: 0, landD: 0, landR: 0, votesInD: 0, votesInR: 0, cntD: 0, cntR: 0 };
+  S = { dem: 0, rep: 0, oth: 0, tot: 0, landD: 0, landR: 0, votesInD: 0, votesInR: 0, cntD: 0, cntR: 0, cntNone: 0, landNone: 0 };
   for (const c of counties) {
     S.dem += c.dem; S.rep += c.rep; S.oth += c.other; S.tot += c.total;
+    if (!c.total) { S.cntNone++; S.landNone += c.landSqMi; continue; }
     if (c.dem > c.rep) { S.landD += c.landSqMi; S.votesInD += c.total; S.cntD++; }
     else { S.landR += c.landSqMi; S.votesInR += c.total; S.cntR++; }
   }
@@ -98,6 +104,7 @@ function setRace(id) {
   for (const b of document.querySelectorAll('.races button'))
     b.setAttribute('aria-pressed', String(b.dataset.race ? b.dataset.race === race.id : +b.dataset.year === race.year));
   $('raceSelect').value = race.id;
+  if (race.chamber) { renderChamber(nm); finishRace(); return; }
   if (HIST) { renderHistory(minor, nm); finishRace(); return; }
   $('raceLine').textContent = `2026 ${race.label} election in Texas · ` +
     [D, R, ...minor.filter(c => c.party !== 'W')].map(c => `${c.name} (${PARTY_LONG[c.party] || c.party})`).join(', ');
@@ -148,6 +155,71 @@ function finishRace() {
   if (meshes.length) restyle();
 }
 
+// Legislative races (U.S. House, Texas House, Texas Senate): every district of the chamber, added up by county. Seats are won district by
+// district, so the text compares the seats each party won with its share of the chamber's vote.
+function renderChamber(nm) {
+  const n = race.districts.length, seatD = race.seats.DEM || 0, seatR = race.seats.REP || 0;
+  const noD = race.districts.filter(d => !d.candidates.some(c => c.party === 'DEM')).length;
+  const noR = race.districts.filter(d => !d.candidates.some(c => c.party === 'REP')).length;
+  const offBallot = race.districts.filter(d => d.unopposed).length;
+  // Texas Senate: staggered terms, so only some of its seats are up in a given year, and many counties have no race at all
+  const staggered = race.size > n;
+  const noneTxt = staggered ? `no ${race.label} race this year, or only one with a single candidate` : `a single candidate in every ${race.label} race`;
+  const yr = HIST ? `${race.year} ` : '2026 ';
+  $('raceLine').textContent = `${yr}${race.label} elections in Texas${HIST && race.date ? `, ${race.date}` : ''}${race.unofficial && HIST ? ' (unofficial results)' : ''} · ` +
+    (staggered ? `${n} of ${race.size} districts up this year, ` : `${n} districts, `) + `every one added up by county`;
+  const dVotes = S.dem > S.rep, dSeats = seatD > seatR;
+  const [vW, va, vb] = dVotes ? [nm(D), S.dem, S.rep] : [nm(R), S.rep, S.dem];
+  const [sW, sa] = dSeats ? [nm(D), seatD] : [nm(R), seatR];
+  const mapR = S.landR > S.landD, [mapName, mapCnt, mapLand] = mapR ? [nm(R), S.cntR, S.landR] : [nm(D), S.cntD, S.landD];
+  $('headline').innerHTML =
+    `Adding up every ${race.label} district, ${mapName} got more votes in <b class="hl">${mapCnt} of ${counties.length}</b> counties, which cover ` +
+    `<b class="hl">${pct(mapLand, land, 0)}</b> of the land${S.cntNone ? ` (${S.cntNone} counties had ${staggered ? `no ${race.label} race this year or no contested one` : 'no contested race'})` : ''}. ${vW} won the ${race.label} vote ${staggered ? 'in the districts that were up' : 'statewide'}, <b class="hl">${pct(va, S.tot)} to ${pct(vb, S.tot)}</b>, ` +
+    (dVotes === dSeats ? `and` : `${HIST ? 'while' : 'but'} ${sW} won`) + ` <b class="hl">${sa} of the ${n} seats</b>${staggered ? ` that were up (the Senate has ${race.size})` : ''}.`;
+  const lD = 100 * S.landD / land, vD = 100 * S.votesInD / S.tot;
+  const sD = 100 * S.dem / S.tot, sR = 100 * S.rep / S.tot, sO = 100 - sD - sR;
+  const kD = 100 * seatD / n;
+  $('bars').innerHTML =
+    bar(`Land area, split by which party got more ${race.label} votes in each county`,
+      [['d', lD, lD.toFixed(0) + '% D'], ['o', 100 * S.landNone / land, ''], ['r', 100 * S.landR / land, (100 * S.landR / land).toFixed(0) + '% R']],
+      S.cntNone ? `Gray: ${S.cntNone} counties with ${noneTxt}, so no votes were reported.` : '') +
+    bar('Votes cast, split the same way', [['d', vD, vD.toFixed(0) + '% D'], ['r', 100 - vD, (100 - vD).toFixed(0) + '% R']]) +
+    bar(staggered ? `${race.label} vote, all districts that were up` : `Statewide ${race.label} vote`, [['d', sD, sD.toFixed(1) + '% D'], ['o', sO, ''], ['r', sR, sR.toFixed(1) + '% R']],
+      otherLabel ? `Gray: ${otherLabel}, ${sO.toFixed(1)}%` : '') +
+    bar(staggered ? `Seats won (${n} of ${race.size} were up)` : 'Seats won', [['d', kD, `${seatD} D`], ['o', 100 * (n - seatD - seatR) / n, ''], ['r', 100 * seatR / n, `${seatR} R`]],
+      (noD || noR ? [noD ? `${noD} district${noD > 1 ? 's' : ''} had no Democratic candidate` : '', noR ? `${noR} district${noR > 1 ? 's' : ''} had no Republican candidate` : '']
+        .filter(Boolean).join(' and ') + `. Their votes all count for the other party, so the vote shares above lean that way.`
+        : 'Every district had both a Democratic and a Republican candidate.') +
+      (offBallot ? ` ${offBallot} of them had a single candidate and were not on the ballot, so they add a seat but no votes.` : ''));
+  const asc = [...desc].reverse().filter(c => c.total), big = desc[0], small = asc[0];
+  const wide = race.districts.reduce((a, d) => d.counties > a.counties ? d : a);
+  $('scale').textContent =
+    `${race.label} seats are won district by district, and districts don't follow county lines: ${big.name} County had ` +
+    `${big.districts} ${race.label} district races on its ballot, while District ${wide.district} spans ${wide.counties} counties. This map adds up every district's votes within each county.`;
+  $('raiseText').innerHTML =
+    `Press <b>Raise the counties</b> and each county becomes a column whose height is the number of ${race.label} votes cast there. ` +
+    `${small.name} County cast ${fmt(small.total)}; ${big.name} County cast ${fmt(big.total)}.`;
+  const close = [...race.districts].map(d => {
+    const [a, b] = d.candidates; return { d, m: b ? (a.votes - b.votes) / d.total : 1, w: a };
+  }).sort((x, y) => x.m - y.m).slice(0, 3);
+  $('harris').innerHTML = `Closest districts: ` + close.map(({ d, m, w }) =>
+    `District ${d.district} (${w.name}, ${PARTY_SHORT[w.party] || w.party}, by ${(100 * m).toFixed(1)} points)`).join('; ') + '.';
+  $('legRTitle').textContent = `${nm(R)} got more ${race.label} votes in the county`;
+  $('legDTitle').textContent = `${nm(D)} got more ${race.label} votes in the county`;
+  $('method').innerHTML = `
+    <p><b>Votes:</b> for each county, the votes cast in every ${race.label} district that reaches into it, added up by party. Where a district
+    crosses county lines, only the part of its vote cast in that county is counted. A district with no candidate from one party adds
+    nothing to that party's total, so counties in uncontested districts lean further toward the other party than its voters may.</p>
+    <p><b>Seats:</b> each district's winner, from the same results. ${HIST ? `Source for this race: <a href="${race.sourceUrl}" target="_blank" rel="noopener">${race.source}</a>.` :
+      `These are the Secretary of State's election-night returns as of ${meta.resultsUpdated}, unofficial until the state canvass. Every candidate's
+      county figures add up exactly to the district totals the Secretary of State publishes.`}</p>
+    <p><b>Column height</b> is proportional to votes cast, on the same scale as every other race. Each raised column is stacked by party, and
+    <b>color</b> shows the leading party's share of all ${race.label} votes cast in the county, in 10-point bands.</p>
+    <p><b>Land area</b> is the Census Bureau's land area for each county (water excluded).</p>
+    <p>The data file and the script that builds it are <a href="https://github.com/johnesco/texas">on GitHub</a>.</p>`;
+  if (HIST) renderTable();
+}
+
 // History page text: the facts of the selected race, stated the same way for every year and both parties.
 const raceName = r => r.label === 'President' ? 'presidential' : r.label;
 const PARTY_WORD = { DEM: 'Democrat', REP: 'Republican' };
@@ -196,19 +268,26 @@ function renderHistory(minor, nm) {
 }
 
 // History page: every race in one table, newest first; each row opens that race on the map
-const SHORT_LABEL = { 'U.S. Senate': 'Senate', 'Lieutenant Governor': 'Lt. Gov.', 'Attorney General': 'Atty. Gen.', 'Governor': 'Governor' };
+const SHORT_LABEL = { 'U.S. House': 'U.S. House', 'Texas House': 'Texas House', 'Texas Senate': 'Texas Senate', 'U.S. Senate': 'Senate', 'Lieutenant Governor': 'Lt. Gov.', 'Attorney General': 'Atty. Gen.', 'Governor': 'Governor' };
 const tableRows = !HIST ? [] : [...YEARS].reverse().flatMap(y => races.filter(r => r.year === y)).map(r => {
   let dem = 0, rep = 0, tot = 0, cntD = 0;
   r.counties.forEach(([d, p, , t]) => { dem += d; rep += p; tot += t; if (d > p) cntD++; });
+  if (r.chamber) { // House: the party that won more seats, its share of the chamber's vote, and its seats
+    const n = r.districts.length, sW = (r.seats.DEM || 0) > (r.seats.REP || 0) ? 'DEM' : 'REP';
+    const wv = sW === 'DEM' ? dem : rep, lv = sW === 'DEM' ? rep : dem;
+    const cnt = r.counties.filter(([d, p, , t]) => t && (sW === 'DEM' ? d > p : p >= d)).length;
+    return { r, W: r.candidates.find(c => c.party === sW), seats: `${r.seats[sW]} of ${n} seats`, share: 100 * wv / tot, margin: 100 * (wv - lv) / tot, cnt, tot };
+  }
   const dW = dem > rep, W = r.candidates.find(c => c.party === (dW ? 'DEM' : 'REP'));
   return { r, W, share: 100 * Math.max(dem, rep) / tot, margin: 100 * Math.abs(dem - rep) / tot, cnt: dW ? cntD : r.counties.length - cntD, tot };
 });
 function renderTable() {
   $('table').innerHTML = `<tr><th>Race</th><th>Winner</th><th class="n">Share</th><th class="n">Margin</th><th class="n">Counties</th><th class="n">Votes</th></tr>` +
-    tableRows.map(({ r, W, share, margin, cnt, tot }, i) =>
+    tableRows.map(({ r, W, seats, share, margin, cnt, tot }, i) =>
       `<tr class="${r.id === race.id ? 'cur' : ''}${i && tableRows[i - 1].r.year !== r.year ? ' yr' : ''}">` +
       `<td><a href="?race=${r.id}" data-go="${r.id}">${r.year} ${SHORT_LABEL[r.label] || r.label}</a></td>` +
-      `<td>${W.last} (${PARTY_SHORT[W.party]})</td><td class="n">${share.toFixed(1)}%</td><td class="n">${margin.toFixed(1)}</td>` +
+      `<td>${seats ? `${PARTY_SHORT[W.party]}, ${seats}` : `${W.last} (${PARTY_SHORT[W.party]})`}</td><td class="n">${share.toFixed(1)}%</td>` +
+      `<td class="n">${margin < 0 ? '−' : ''}${Math.abs(margin).toFixed(1)}</td>` +
       `<td class="n">${cnt}</td><td class="n">${(tot / 1e6).toFixed(2)}M</td></tr>`).join('');
 }
 const BUTTON_LABEL = { 'lieutenant-governor': 'Lt. Governor' };
@@ -226,7 +305,9 @@ if (!HIST) {
     YEARS.map(y => `<button type="button" data-year="${y}" aria-pressed="false">${y}</button>`).join('') +
     `<select id="raceSelect" aria-label="Choose a race">` +
     [...YEARS].reverse().map(y => `<optgroup label="${y}${y === 2026 ? ' (unofficial)' : ''}">` +
-      races.filter(r => r.year === y).map(r => `<option value="${r.id}">${y} ${r.label}: ${r.candidates.find(c => c.party === 'DEM').last} (D) vs. ${r.candidates.find(c => c.party === 'REP').last} (R)</option>`).join('') +
+      races.filter(r => r.year === y).map(r => `<option value="${r.id}">${y} ${r.label}: ` + (r.chamber
+        ? `${r.seats.DEM || 0} D, ${r.seats.REP || 0} R seats`
+        : `${r.candidates.find(c => c.party === 'DEM').last} (D) vs. ${r.candidates.find(c => c.party === 'REP').last} (R)`) + `</option>`).join('') +
       `</optgroup>`).join('') +
     `</select>`;
 }
@@ -255,7 +336,11 @@ $('sources').innerHTML = `<ol>
   ${HIST ? `<li>Texas Secretary of State, <a href="https://elections.sos.state.tx.us/index.htm" target="_blank" rel="noopener">Election History</a>,
     official canvassed county results for the 2008, 2010, 2012, 2014, 2016 and 2018 general elections, retrieved ${hist.meta.retrieved}.</li>
   <li>Texas Secretary of State, <a href="https://results.texas-election.com/races" target="_blank" rel="noopener">election results site</a>,
-    final county results for the 2020, 2022 and 2024 general elections, retrieved ${hist.meta.retrieved}.</li>` : ''}
+    final county results for the 2020, 2022 and 2024 general elections, retrieved ${hist.meta.retrieved}.</li>
+  <li>U.S. House, Texas House and Texas Senate: the same two sources, read district by district (2008–2018: each district's county-by-county canvass page,
+    checked against the Statewide Race Summary; 2020–2024: the county file, checked against the district totals). Districts with a single
+    candidate that were left off the November ballot (3 in 2010, 72 in 2022) are counted for the party that nominated a candidate, from the
+    same sources' party primary results. Texas Senate terms are staggered: the districts up each year are the ones in that year's primaries.</li>` : ''}
   <li>Texas Secretary of State, <a href="${meta.resultsUrl}" target="_blank" rel="noopener">Election Night Returns, 2026 November General Election</a>, county results for statewide races
     (<a href="${meta.resultsApi}" target="_blank" rel="noopener">data feed</a>), as of ${meta.resultsUpdated}, retrieved ${meta.retrieved}.</li>
   <li>Texas Secretary of State, <a href="https://electionresults.sos.state.tx.us/results.html" target="_blank" rel="noopener">Election Results, Tuesday, November 3, 2026</a> (statewide totals, used as a cross-check).</li>
@@ -499,7 +584,10 @@ function onPointer(e) {
   setHover(hit ? hit.object.userData.mesh : null); // any segment selects its county
   if (!hovered) { tip.style.display = 'none'; return; }
   const c = hovered.userData, dWon = c.dem > c.rep;
-  tip.innerHTML = `<div class="n">${c.name} County</div>
+  tip.innerHTML = !c.total
+    ? `<div class="n">${c.name} County</div><div class="row m"><span>${HIST ? race.year + ' ' : ''}${race.label}</span><span></span></div>
+      <div class="row m"><span>No votes reported: ${race.size > race.districts.length ? `no ${race.label} race here this year, or only one with a single candidate` : `every ${race.label} race here had a single candidate`}</span><span></span></div>`
+    : `<div class="n">${c.name} County</div>
     <div class="row m"><span>${HIST ? race.year + ' ' : ''}${race.label}</span><span></span></div>
     <div class="row"><span>${D.name} (D)</span><span>${fmt(c.dem)} · ${pct(c.dem, c.total)}</span></div>
     <div class="row"><span>${R.name} (R)</span><span>${fmt(c.rep)} · ${pct(c.rep, c.total)}</span></div>
@@ -507,6 +595,8 @@ function onPointer(e) {
     <div class="row m"><span>Total votes</span><span>${fmt(c.total)}</span></div>
     <div class="row m"><span>Share of all Texas votes</span><span>${pct(c.total, S.tot, 2)}</span></div>
     <div class="row m"><span>Land area</span><span>${fmt(Math.round(c.landSqMi))} sq mi</span></div>
+    ${race.chamber ? `<div class="row m"><span>${race.label} districts here</span><span>${c.districts}</span></div>` +
+      (c.noD || c.noR ? `<div class="row m"><span>Uncontested</span><span>${[c.noD ? `${c.noD} with no D` : '', c.noR ? `${c.noR} with no R` : ''].filter(Boolean).join(', ')}</span></div>` : '') : ''}
     <div class="row m"><span>Margin</span><span style="color:${dWon ? '#8fa8ff' : '#ff8b8b'}">${dWon ? 'D' : 'R'}+${(100 * Math.abs(c.dem - c.rep) / c.total).toFixed(1)} (${fmt(Math.abs(c.dem - c.rep))} votes)</span></div>`;
   tip.style.display = 'block';
   const x = e.clientX - r.left, y = e.clientY - r.top;
