@@ -33,7 +33,7 @@ if (tx.features.length !== 254 || !tx.features.every(f => byFips.has(String(f.id
 // Now page: every 2026 statewide race is offered; these three also get one-click buttons.
 // History page: the major statewide races (President, U.S. Senate, Governor, Lt. Governor, Attorney General) of every
 // general election since 2008, ending with 2026; each year gets a button.
-const FEATURED = ['u-s-senate', 'governor', 'lieutenant-governor'];
+const FEATURED = ['u-s-senate', 'u-s-house', 'governor', 'lieutenant-governor'];
 const MAJOR = ['president', 'u-s-senate', 'governor', 'lieutenant-governor', 'attorney-general', 'u-s-house', 'texas-house', 'texas-senate'];
 const races = !HIST ? res.races.map(r => ({ ...r, year: 2026 })) : [
   ...hist.races,
