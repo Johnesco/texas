@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { geoConicEqualArea, geoCentroid } from 'd3-geo';
 import { feature } from 'topojson-client';
-import { createDots, countyTris, loadBlockGroups, loadPrecincts, precinctUnits } from './dots.js';
+import { createDots, countyTris, loadPrecincts, precinctUnits } from './dots.js';
 
 const GEO_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3.0.1/counties-10m.json';
 
@@ -423,9 +423,8 @@ const params = new URLSearchParams(location.search);
 const DOT = params.get('voters') === '1';
 const DOT_PER = DOT && matchMedia('(pointer: coarse)').matches ? 10 : 1;
 const dots = DOT ? createDots() : null;
-// by precinct, or (if that fails to load) where each county's adults live; failing both, evenly over the county
+// by precinct, or (if that fails to load) evenly over each county
 const PC = DOT ? await loadPrecincts(P).catch(e => { console.error('Precincts did not load', e); return null; }) : null;
-const BG = DOT && !PC ? await loadBlockGroups(P).catch(e => { console.error('Block groups did not load', e); return null; }) : null;
 let dotJob = 0, dotInfo = '';
 if (DOT) { edgeMat.opacity = 0.18; dots.uniforms.uWorld.value = 0; mapGroup.add(dots.points); }
 function requestDots() {
@@ -454,7 +453,7 @@ for (const f of tx.features) {
   const edges = outlineGeometry(shapes);
   if (DOT) { // where the county's dots can land
     c.pc = PC?.byFips.get(c.fips);
-    if (!c.pc) Object.assign(c, BG?.byFips.get(c.fips) || { tris: countyTris(shapes) });
+    if (!c.pc) c.tris = countyTris(shapes);
   }
   const seg = () => { // segments share the county's shape; each is scaled to its height and lifted into place
     const m = new THREE.Mesh(g, [new THREE.MeshBasicMaterial({ visible: !DOT }), new THREE.MeshLambertMaterial({ visible: !DOT })]);

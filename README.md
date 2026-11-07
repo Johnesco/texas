@@ -109,23 +109,24 @@ neighboring blocks blend together. [`dots-worker.js`](dots-worker.js) places the
 [`dots.js`](dots.js) draws them.
 
 The map pages take the same dots with `?voters=1`: the 3D view's columns are built from one dot per voter (one per 10 on
-phones), placed the same way and scaled to whichever race is shown. If the precinct file fails to load, the dots fall back to
-census block groups (each county's voters placed where its adults live, with the county's colors mixed throughout), built by
-[`scripts/build_blockgroups.py`](scripts/build_blockgroups.py) into [`data/blockgroups.json`](data/blockgroups.json) from the
-Census Bureau's 2020 Redistricting Data (P.L. 94-171, `P3_001N`) and 2020 block group boundaries. It downloads them into
-`data/raw/census-dl/` (not committed) and checks that the adults add up to the state total (21,866,700).
+phones), placed the same way and scaled to whichever race is shown. If the precinct file fails to load, the dots are spread
+evenly over each county.
+
+### Precinct data
+
+[`scripts/build_precincts.py`](scripts/build_precincts.py) builds [`data/precincts.json.gz`](data/precincts.json.gz) (gzipped
+to keep the site small; [`dots.js`](dots.js) unzips it in the browser) from the Texas Legislative Council's
+[Capitol Data Portal](https://data.capitol.texas.gov) (2024 general election, U.S. Senator by VTD, and the `VTDs_24PG`
+boundaries, converted from their Lambert conformal conic projection) and the 2020 Census block points, land areas and adults
+(P.L. 94-171, `P3_001N`). Each block is assigned to the VTD that contains its internal point. It also finds each county's most
+crowded spot (adults within half a mile) for the close-ups. The Census files come from
+[`scripts/build_blockgroups.py`](scripts/build_blockgroups.py), which downloads them into `data/raw/census-dl/` and checks that
+the adults add up to the state total (21,866,700); run it first. (It also writes `data/blockgroups.json`, adults by block group,
+which the site no longer uses and isn't committed.)
 
 ```bash
 python scripts/build_blockgroups.py
 ```
-
-### Precinct data
-
-[`scripts/build_precincts.py`](scripts/build_precincts.py) builds [`data/precincts.json`](data/precincts.json) from the Texas
-Legislative Council's [Capitol Data Portal](https://data.capitol.texas.gov) (2024 general election, U.S. Senator by VTD, and
-the `VTDs_24PG` boundaries, converted from their Lambert conformal conic projection) and the 2020 Census block points, land
-areas and adults from the redistricting file `build_blockgroups.py` downloads. Each block is assigned to the VTD that contains
-its internal point. It also finds each county's most crowded spot (adults within half a mile) for the close-ups.
 
 ```bash
 python scripts/build_precincts.py

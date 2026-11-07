@@ -1,10 +1,9 @@
 // One dot per voter, shared by the ?voters=1 view of the map pages (app.js) and the "See every single voter" page (voters.js).
 // dots-worker.js places the dots; this module turns them into one THREE.Points drawn by a small shader.
 //
-// We only know how many people voted in each county, not where they live, so each county's voters are placed where
-// its adults live (by census block group, with loadBlockGroups), at random inside each block group. Each dot also
-// knows its place in the county's raised column (uniforms.uP: 0 = flat map, 1 = raised), so the columns can be built
-// from voters.
+// We only know how many people voted in each county, not where they live, so each county's voters are placed by precinct
+// and census block (loadPrecincts, precinctUnits). Each dot also knows its place in the county's raised column
+// (uniforms.uP: 0 = flat map, 1 = raised), so the main map's columns can be built from voters.
 import * as THREE from 'three';
 
 export const DOT_C = { dem: '#6c7dff', rep: '#ff3b3b', other: '#9aa6b8' };
@@ -21,49 +20,20 @@ export function countyTris(shapes) {
   return new Float32Array(tris);
 }
 
-// Where adults live inside each county, from data/blockgroups.json (scripts/build_blockgroups.py): returns
-// Map(fips -> { tris, w }), the county's block groups as triangles in map units, each weighted by its share of the block
-// group's adults (by area), so a county's dots land where its adults live. P projects [lon, lat] to a THREE.Vector2.
-export async function loadBlockGroups(P, url = 'data/blockgroups.json') {
-  const r = await fetch(url); if (!r.ok) throw new Error(r.status);
-  const data = await r.json();
-  const out = new Map();
-  const triArea = (a, b, c) => Math.abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)) / 2;
-  const ring = flat => {
-    const pts = [];
-    let x = 0, y = 0;
-    for (let i = 0; i < flat.length; i += 2) { x += flat[i]; y += flat[i + 1]; pts.push(P([x / 1e4, y / 1e4])); }
-    if (pts.length > 1 && pts[0].equals(pts.at(-1))) pts.pop();
-    return pts;
-  };
-  for (const [fips, bgs] of Object.entries(data.counties)) {
-    const tris = [], w = [];
-    for (const [adults, polys] of bgs) {
-      const start = w.length;
-      let area = 0;
-      for (const [outer, ...holes] of polys) {
-        const shape = ring(outer), hs = holes.map(ring);
-        const pts = [...shape, ...hs.flat()];
-        for (const [a, b, c] of THREE.ShapeUtils.triangulateShape(shape, hs)) {
-          const A = triArea(pts[a], pts[b], pts[c]);
-          tris.push(pts[a].x, pts[a].y, pts[b].x, pts[b].y, pts[c].x, pts[c].y); w.push(A); area += A;
-        }
-      }
-      for (let i = start; i < w.length; i++) w[i] = area > 0 ? adults * w[i] / area : 0;
-    }
-    out.set(fips, { tris: new Float32Array(tris), w: new Float32Array(w) });
-  }
-  return { byFips: out, hot: data.hot, meta: data.meta };
-}
-
-// Where each county's voters live and how each neighborhood votes, from data/precincts.json (scripts/build_precincts.py):
+// Where each county's voters live and how each neighborhood votes, from data/precincts.json.gz (scripts/build_precincts.py):
 // every 2024 voting district (VTD) with its 2024 U.S. Senate votes and the census blocks inside it, each with its adults
 // and a circle the size of its land area. Returns Map(fips -> { vtds: [{ d, r, o, adults, pts: Float32Array (x, y,
 // radius in map units, adults per block) }], D, R, O (county totals, 2024), adults }), and hot: each county's most
 // crowded spot, [lon, lat, adults per square mile within half a mile].
-export async function loadPrecincts(P, url = 'data/precincts.json') {
+// The file is stored gzipped to keep the site small; it's unzipped here unless the server already did (as when it's sent
+// with Content-Encoding: gzip).
+export async function loadPrecincts(P, url = 'data/precincts.json.gz') {
   const res = await fetch(url); if (!res.ok) throw new Error(res.status);
-  const data = await res.json();
+  const buf = new Uint8Array(await res.arrayBuffer());
+  const zipped = buf[0] === 0x1f && buf[1] === 0x8b;
+  const text = zipped ? await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).text()
+    : new TextDecoder().decode(buf);
+  const data = JSON.parse(text);
   // map units per meter, from 0.1 degree of latitude (about 11.1 km) in the middle of the state
   const upm = P([-99.5, 31]).distanceTo(P([-99.5, 31.1])) / 11113;
   const out = new Map();

@@ -1,3 +1,4 @@
 .claude/
 __pycache__/
 data/raw/census-dl/
+data/blockgroups.json

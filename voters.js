@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { geoConicEqualArea, geoCentroid } from 'd3-geo';
 import { feature } from 'topojson-client';
-import { createDots, countyTris, loadBlockGroups, loadPrecincts, precinctUnits, DOT_C } from './dots.js';
+import { createDots, countyTris, loadPrecincts, precinctUnits, DOT_C } from './dots.js';
 
 const GEO_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3.0.1/counties-10m.json';
 const $ = id => document.getElementById(id);
@@ -63,7 +63,7 @@ for (const f of tx.features) {
     for (const h of holes) s.holes.push(new THREE.Path(ringPts(h)));
     return s;
   });
-  c.tris = countyTris(shapes); // the county's outline, used if neither precincts nor block groups load
+  c.tris = countyTris(shapes); // the county's outline, used if the precincts don't load
   const edges = [];
   for (const s of shapes) for (const ring of [s.getPoints(), ...s.holes.map(h => h.getPoints())])
     for (let i = 0; i < ring.length; i++) { const a = ring[i], b = ring[(i + 1) % ring.length]; edges.push(a.x, a.y, 0, b.x, b.y, 0); }
@@ -95,11 +95,11 @@ $('legend').innerHTML = [[DOT_C.dem, `${D.last} (D)`], [DOT_C.rep, `${R.last} (R
 
 // Where to put each county's voters. The 2026 results are by county, so each party's county total is placed by precinct
 // the way that party's voters were spread in the 2024 Senate race, then on census blocks by adults (dots.js). If that file
-// fails to load, the dots go where each county's adults live (census block groups) instead, and failing that, evenly.
+// fails to load, the dots are spread evenly over each county instead.
 const HOT_R = 0.5; // miles: a county's "most crowded spot" is the most voters within this distance
 $('loading').textContent = 'Loading precincts…';
-let PC = null, BG = null;
-try { PC = await loadPrecincts(P); } catch (e) { console.error('Precincts did not load; dots placed by block group', e); }
+let PC = null;
+try { PC = await loadPrecincts(P); } catch (e) { console.error('Precincts did not load; dots spread evenly', e); }
 if (PC) for (const c of ordered) {
   const pc = PC.byFips.get(c.fips); if (!pc) continue;
   c.units = precinctUnits(pc, c);
@@ -109,16 +109,6 @@ if (PC) for (const c of ordered) {
   let n = 0;
   for (let i = 0; i < u.length; i += 6) if ((u[i] - h.x) ** 2 + (u[i + 1] - h.y) ** 2 <= r2) n += u[i + 3] + u[i + 4] + u[i + 5];
   c.hot = { x: h.x, y: h.y, voters: n / (Math.PI * HOT_R ** 2) };
-}
-else {
-  $('loading').textContent = 'Loading where Texans live…';
-  try { BG = await loadBlockGroups(P); } catch (e) { console.error('Block groups did not load; dots spread evenly', e); }
-  if (BG) for (const c of ordered) {
-    const b = BG.byFips.get(c.fips); if (!b) continue;
-    c.tris = b.tris; c.w = b.w;
-    const adults = b.w.reduce((s, x) => s + x, 0), [lon, lat, adultsPerSqMi] = BG.hot[c.fips], h = P([lon, lat]);
-    c.hot = { x: h.x, y: h.y, voters: adultsPerSqMi * c.total / adults }; // if the spot's adults voted at the county's rate
-  }
 }
 // the most crowded neighborhood in the state
 const DENSE = [...ordered].sort((a, b) => b.hot.voters - a.hot.voters)[0];
@@ -316,7 +306,7 @@ function zoomPath(a, b) {
   const r2 = RHO * RHO, r4 = r2 * r2;
   const b0 = (w1 * w1 - w0 * w0 + r4 * u1 * u1) / (2 * w0 * r2 * u1);
   const b1 = (w1 * w1 - w0 * w0 - r4 * u1 * u1) / (2 * w1 * r2 * u1);
-  const r0 = Math.log(-b0 + Math.sqrt(b0 * b0 + 1)), r1 = Math.log(-b1 + Math.sqrt(b1 * b1 + 1));
+  const r0 = -Math.asinh(b0), r1 = -Math.asinh(b1); // ln(-b + sqrt(b² + 1)), without losing precision for large b
   return { S: (r1 - r0) / RHO, dx, dy, u1, at: s => ({
     u: w0 / r2 * (Math.cosh(r0) * Math.tanh(RHO * s + r0) - Math.sinh(r0)),
     w: w0 * Math.cosh(r0) / Math.cosh(RHO * s + r0) }) };

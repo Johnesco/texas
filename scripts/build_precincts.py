@@ -1,4 +1,4 @@
-"""Build data/precincts.json: where each county's voters live and how each neighborhood votes, for the ?voters=1 view.
+"""Build data/precincts.json.gz: where each county's voters live and how each neighborhood votes, for the ?voters=1 view.
 
 Results for 2026 are known by county only. Precinct (VTD) results for 2026 aren't published yet, so this uses the
 pattern of the 2024 U.S. Senate race (Allred vs. Cruz) inside each county:
@@ -231,6 +231,8 @@ out = {
     "counties": counties,
     "hot": hot,
 }
-path = ROOT / "data" / "precincts.json"
-path.write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
+# gzipped (mtime 0, so a rebuild with the same data gives the same file); dots.js unzips it in the browser
+import gzip
+path = ROOT / "data" / "precincts.json.gz"
+path.write_bytes(gzip.compress(json.dumps(out, separators=(",", ":")).encode("utf-8"), 9, mtime=0))
 print(f"wrote {path} ({path.stat().st_size / 1e6:.1f} MB)")
