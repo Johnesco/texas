@@ -90,6 +90,47 @@ most of the vote but 14 of 38 seats; those steps color each county by the chambe
 visit is written by hand. Plain HTML, CSS and JS, with the same three.js / d3-geo / topojson-client modules as the map. The
 county drawing code it uses is in [`map3d.js`](map3d.js).
 
+## See every single voter (dot page)
+
+[`voters.html`](https://johnesco.github.io/texas/voters.html) is an animation that plays on its own, with one dot for each of the
+9,889,704 people who voted in the 2026 U.S. Senate race, always over the flat map. It shows the whole state, then the emptiest
+county (Loving), the county with the most voters (Harris) and the most crowded county (Dallas), then comes down into the most
+crowded neighborhood in the state until single voters stand apart, and shows the same zoom over Loving. Then it flies over
+Houston, Dallas–Fort Worth, Austin and San Antonio, the border and El Paso, and last visits the most crowded spot in seven more
+counties. Each close-up zooms in as far as that spot needs: the typical gap between voters there is drawn about 16 pixels
+wide. `?scene=N` opens it at scene N.
+
+The results give votes by county, not by address. Precinct results for 2026 aren't published yet, so the dots are placed by
+the pattern of the 2024 U.S. Senate race (Allred vs. Cruz) inside each county. Each party's 2026 county total is shared among the
+county's 2024 voting districts (VTDs) in proportion to that party's 2024 votes there, so every county still adds up exactly to
+its 2026 result and each neighborhood keeps its own party mix. Within each VTD, the dots are shared among its census blocks by
+population 18 and over (2020 Census), and scattered around each block with a soft bell-curve spread about the block's size, so
+neighboring blocks blend together. [`dots-worker.js`](dots-worker.js) places the dots in a background thread;
+[`dots.js`](dots.js) draws them.
+
+The map pages take the same dots with `?voters=1`: the 3D view's columns are built from one dot per voter (one per 10 on
+phones), placed the same way and scaled to whichever race is shown. If the precinct file fails to load, the dots fall back to
+census block groups (each county's voters placed where its adults live, with the county's colors mixed throughout), built by
+[`scripts/build_blockgroups.py`](scripts/build_blockgroups.py) into [`data/blockgroups.json`](data/blockgroups.json) from the
+Census Bureau's 2020 Redistricting Data (P.L. 94-171, `P3_001N`) and 2020 block group boundaries. It downloads them into
+`data/raw/census-dl/` (not committed) and checks that the adults add up to the state total (21,866,700).
+
+```bash
+python scripts/build_blockgroups.py
+```
+
+### Precinct data
+
+[`scripts/build_precincts.py`](scripts/build_precincts.py) builds [`data/precincts.json`](data/precincts.json) from the Texas
+Legislative Council's [Capitol Data Portal](https://data.capitol.texas.gov) (2024 general election, U.S. Senator by VTD, and
+the `VTDs_24PG` boundaries, converted from their Lambert conformal conic projection) and the 2020 Census block points, land
+areas and adults from the redistricting file `build_blockgroups.py` downloads. Each block is assigned to the VTD that contains
+its internal point. It also finds each county's most crowded spot (adults within half a mile) for the close-ups.
+
+```bash
+python scripts/build_precincts.py
+```
+
 ## Share image
 
 [`scripts/panels.html`](scripts/panels.html) draws the two-panel image "Texas Looks Red / But Talarico Won" with stacked

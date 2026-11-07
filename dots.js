@@ -1,9 +1,10 @@
-// One dot per voter, shared by the ?dot= view of the main map (app.js) and the "See every single voter" page (voters.js).
+// One dot per voter, shared by the ?voters=1 view of the map pages (app.js) and the "See every single voter" page (voters.js).
 // dots-worker.js places the dots; this module turns them into one THREE.Points drawn by a small shader.
 //
-// We only know how many people voted in each county, not where they live, so each county's voters are scattered at
-// random inside its borders. Each dot also knows its place in the county's raised column (uniforms.uP: 0 = flat map,
-// 1 = raised), so the main map's columns can be built from voters.
+// We only know how many people voted in each county, not where they live, so each county's voters are placed where
+// its adults live (by census block group, with loadBlockGroups), at random inside each block group. Each dot also
+// knows its place in the county's raised column (uniforms.uP: 0 = flat map, 1 = raised), so the columns can be built
+// from voters.
 import * as THREE from 'three';
 
 export const DOT_C = { dem: '#6c7dff', rep: '#ff3b3b', other: '#9aa6b8' };
@@ -18,6 +19,91 @@ export function countyTris(shapes) {
     for (const [a, b, d] of faces) tris.push(pts[a].x, pts[a].y, pts[b].x, pts[b].y, pts[d].x, pts[d].y);
   }
   return new Float32Array(tris);
+}
+
+// Where adults live inside each county, from data/blockgroups.json (scripts/build_blockgroups.py): returns
+// Map(fips -> { tris, w }), the county's block groups as triangles in map units, each weighted by its share of the block
+// group's adults (by area), so a county's dots land where its adults live. P projects [lon, lat] to a THREE.Vector2.
+export async function loadBlockGroups(P, url = 'data/blockgroups.json') {
+  const r = await fetch(url); if (!r.ok) throw new Error(r.status);
+  const data = await r.json();
+  const out = new Map();
+  const triArea = (a, b, c) => Math.abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)) / 2;
+  const ring = flat => {
+    const pts = [];
+    let x = 0, y = 0;
+    for (let i = 0; i < flat.length; i += 2) { x += flat[i]; y += flat[i + 1]; pts.push(P([x / 1e4, y / 1e4])); }
+    if (pts.length > 1 && pts[0].equals(pts.at(-1))) pts.pop();
+    return pts;
+  };
+  for (const [fips, bgs] of Object.entries(data.counties)) {
+    const tris = [], w = [];
+    for (const [adults, polys] of bgs) {
+      const start = w.length;
+      let area = 0;
+      for (const [outer, ...holes] of polys) {
+        const shape = ring(outer), hs = holes.map(ring);
+        const pts = [...shape, ...hs.flat()];
+        for (const [a, b, c] of THREE.ShapeUtils.triangulateShape(shape, hs)) {
+          const A = triArea(pts[a], pts[b], pts[c]);
+          tris.push(pts[a].x, pts[a].y, pts[b].x, pts[b].y, pts[c].x, pts[c].y); w.push(A); area += A;
+        }
+      }
+      for (let i = start; i < w.length; i++) w[i] = area > 0 ? adults * w[i] / area : 0;
+    }
+    out.set(fips, { tris: new Float32Array(tris), w: new Float32Array(w) });
+  }
+  return { byFips: out, hot: data.hot, meta: data.meta };
+}
+
+// Where each county's voters live and how each neighborhood votes, from data/precincts.json (scripts/build_precincts.py):
+// every 2024 voting district (VTD) with its 2024 U.S. Senate votes and the census blocks inside it, each with its adults
+// and a circle the size of its land area. Returns Map(fips -> { vtds: [{ d, r, o, adults, pts: Float32Array (x, y,
+// radius in map units, adults per block) }], D, R, O (county totals, 2024), adults }), and hot: each county's most
+// crowded spot, [lon, lat, adults per square mile within half a mile].
+export async function loadPrecincts(P, url = 'data/precincts.json') {
+  const res = await fetch(url); if (!res.ok) throw new Error(res.status);
+  const data = await res.json();
+  // map units per meter, from 0.1 degree of latitude (about 11.1 km) in the middle of the state
+  const upm = P([-99.5, 31]).distanceTo(P([-99.5, 31.1])) / 11113;
+  const out = new Map();
+  for (const [fips, vtds] of Object.entries(data.counties)) {
+    let D = 0, R = 0, O = 0;
+    const list = vtds.map(([d, r, o, flat]) => {
+      D += d; R += r; O += o;
+      const pts = new Float32Array(flat.length);
+      let x = 0, y = 0, adults = 0;
+      for (let i = 0; i < flat.length; i += 4) {
+        x += flat[i]; y += flat[i + 1];
+        const p = P([x / 1e4, y / 1e4]);
+        pts[i] = p.x; pts[i + 1] = p.y; pts[i + 2] = flat[i + 2] * 10 * upm; pts[i + 3] = flat[i + 3];
+        adults += flat[i + 3];
+      }
+      return { d, r, o, adults, pts };
+    });
+    out.set(fips, { vtds: list, D, R, O, adults: list.reduce((s, v) => s + v.adults, 0) });
+  }
+  return { byFips: out, hot: data.hot, meta: data.meta };
+}
+
+// The places for one county's dots (dots-worker.js `units`): each census block with the votes it is expected to hold.
+// Each party's county total (dem, rep, other: the race being shown) is shared among the VTDs in proportion to that party's
+// 2024 Senate votes there, then among each VTD's blocks by adults. A party with no 2024 votes in the county is shared by
+// all 2024 votes instead.
+export function precinctUnits({ vtds, D, R, O }, { dem, rep, other }) {
+  const T = D + R + O, n = vtds.reduce((s, v) => s + v.pts.length / 4, 0);
+  const units = new Float32Array(n * 6);
+  // this VTD's share of a party's county votes: its share of that party's 2024 votes (or of all 2024 votes)
+  const share = (v, own, countyOwn) => countyOwn > 0 ? own / countyOwn : (v.d + v.r + v.o) / T;
+  let j = 0;
+  for (const v of vtds) {
+    const ed = dem * share(v, v.d, D), er = rep * share(v, v.r, R), eo = other * share(v, v.o, O);
+    for (let i = 0; i < v.pts.length; i += 4) {
+      const s = v.adults > 0 ? v.pts[i + 3] / v.adults : 0;
+      units.set([v.pts[i], v.pts[i + 1], v.pts[i + 2], ed * s, er * s, eo * s], j); j += 6;
+    }
+  }
+  return units;
 }
 
 const glslColor = h => { const c = new THREE.Color(h); return `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)})`; };
@@ -85,12 +171,13 @@ export function createDots({ depthTest = true } = {}) {
     uniforms.uCounties.value = tex;
     done({ n: counts[0] + counts[1] + counts[2], counts });
   };
-  // counties: [{ tris, dem, rep, other, target (raised height, map units), delay (rise delay, 0..0.25) }]
+  // counties: [{ tris, w (optional triangle weights) or units (places, from precinctUnits), dem, rep, other, target (raised
+  // height, map units), delay (rise delay, 0..0.25) }]
   function place(counties, { per = 1, seed = 1 } = {}) {
     return new Promise(resolve => {
       done = resolve;
       worker.postMessage({ per, seed, job: ++job,
-        counties: counties.map(({ tris, dem, rep, other, target = 0, delay = 0 }) => ({ tris, dem, rep, other, target, delay })) });
+        counties: counties.map(({ tris, w, units, dem, rep, other, target = 0, delay = 0 }) => ({ tris, w, units, dem, rep, other, target, delay })) });
     });
   }
   return { points, uniforms, place };

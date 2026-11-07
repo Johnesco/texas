@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { geoConicEqualArea, geoCentroid } from 'd3-geo';
 import { feature } from 'topojson-client';
-import { createDots, countyTris } from './dots.js';
+import { createDots, countyTris, loadBlockGroups, loadPrecincts, precinctUnits } from './dots.js';
 
 const GEO_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3.0.1/counties-10m.json';
 
@@ -152,7 +152,7 @@ function setRace(id) {
   finishRace();
 }
 function finishRace() {
-  try { history.replaceState(null, '', `?race=${race.id}${DOT ? `&dot=${DOT_PARAM}` : ''}`); } catch {}
+  try { history.replaceState(null, '', `?race=${race.id}${DOT ? '&voters=1' : ''}`); } catch {}
   if (meshes.length) restyle();
 }
 
@@ -413,25 +413,28 @@ function outlineGeometry(shapes) {
 const labelsEl = document.getElementById('labels');
 let labeled = [], ready = false; // ready: camera + hover code below has been set up
 
-// ---------- dot view (?dot=N, experimental): one dot per N voters, default 1 ----------
-// Each county's voters are scattered at random inside the county (we only know votes by county, not where anyone lives),
-// colored by the party they voted for. Raised, the dots fill the county's column in the same stacking order as the
-// columns: runner-up at the bottom, others in the middle, winner on top. The column meshes stay in the scene, unpainted,
-// so hover and the labels work as before. Phones and tablets get one dot per 10 voters unless ?dot= asks for more than 1.
+// ---------- voter dots (?voters=1): one dot per voter ----------
+// We only know votes by county, so each county's voters are placed by precinct: each party's county total is shared among
+// the 2024 voting districts the way that party's 2024 Senate votes were, then among census blocks by adults (dots.js,
+// loadPrecincts), colored by the party they voted for. Raised, the dots fill the county's column in the same stacking order
+// as the columns: runner-up at the bottom, others in the middle, winner on top. The column meshes stay in the scene,
+// unpainted, so hover and the labels work as before. Phones and tablets get one dot per 10 voters.
 const params = new URLSearchParams(location.search);
-const DOT_PARAM = params.get('dot');
-const DOT = DOT_PARAM !== null && DOT_PARAM !== '0';
-const DOT_PER = !DOT ? 0 : Math.max(1, Math.round(+DOT_PARAM) || 1) === 1 && matchMedia('(pointer: coarse)').matches ? 10
-  : Math.max(1, Math.round(+DOT_PARAM) || 1);
+const DOT = params.get('voters') === '1';
+const DOT_PER = DOT && matchMedia('(pointer: coarse)').matches ? 10 : 1;
 const dots = DOT ? createDots() : null;
+// by precinct, or (if that fails to load) where each county's adults live; failing both, evenly over the county
+const PC = DOT ? await loadPrecincts(P).catch(e => { console.error('Precincts did not load', e); return null; }) : null;
+const BG = DOT && !PC ? await loadBlockGroups(P).catch(e => { console.error('Block groups did not load', e); return null; }) : null;
 let dotJob = 0, dotInfo = '';
 if (DOT) { edgeMat.opacity = 0.18; dots.uniforms.uWorld.value = 0; mapGroup.add(dots.points); }
 function requestDots() {
   dotInfo = 'Placing dots…'; if (ready) updateMode();
   const job = ++dotJob;
-  dots.place(meshes.map(m => m.userData), { per: DOT_PER, seed: 1 + races.indexOf(race) }).then(({ n }) => {
+  const list = meshes.map(m => { const c = m.userData; return c.pc ? { ...c, units: precinctUnits(c.pc, c) } : c; });
+  dots.place(list, { per: DOT_PER, seed: 1 + races.indexOf(race) }).then(({ n }) => {
     if (job !== dotJob) return;
-    dotInfo = `${fmt(n)} dots · 1 dot = ${DOT_PER === 1 ? '1 voter' : `${DOT_PER} voters`}`;
+    dotInfo = `${fmt(n)} dots · 1 dot = ${DOT_PER === 1 ? '1 voter' : `${DOT_PER} voters`}${PC ? ' · placed by 2024 precinct' : ''}`;
     if (ready) updateMode();
   });
 }
@@ -449,7 +452,10 @@ for (const f of tx.features) {
   });
   const g = new THREE.ExtrudeGeometry(shapes, { depth: 1, bevelEnabled: false });
   const edges = outlineGeometry(shapes);
-  if (DOT) c.tris = countyTris(shapes); // the county's area as triangles, for scattering its dots
+  if (DOT) { // where the county's dots can land
+    c.pc = PC?.byFips.get(c.fips);
+    if (!c.pc) Object.assign(c, BG?.byFips.get(c.fips) || { tris: countyTris(shapes) });
+  }
   const seg = () => { // segments share the county's shape; each is scaled to its height and lifted into place
     const m = new THREE.Mesh(g, [new THREE.MeshBasicMaterial({ visible: !DOT }), new THREE.MeshLambertMaterial({ visible: !DOT })]);
     m.add(new THREE.LineSegments(edges, edgeMat));
