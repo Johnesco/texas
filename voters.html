@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>See Every Single Voter</title>
+<meta name="description" content="An animated flight over Texas with one dot for each of the 9.9 million people who voted in the 2026 U.S. Senate race, from the emptiest county to the most crowded, close enough to see single voters." />
+<link rel="canonical" href="https://johnesco.github.io/texas/voters.html" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Texas Votes, Raised" />
+<meta property="og:url" content="https://johnesco.github.io/texas/voters.html" />
+<meta property="og:title" content="See every single voter: 9.9 million Texans, one dot each" />
+<meta property="og:description" content="Fly over Texas with one dot for every voter in the 2026 U.S. Senate race, from Loving County's 67 voters to Dallas County's 783,714." />
+<meta property="og:image" content="https://johnesco.github.io/texas/share.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="https://johnesco.github.io/texas/share.png" />
+<link rel="stylesheet" href="style.css" />
+<link rel="stylesheet" href="voters.css" />
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "d3-geo": "https://cdn.jsdelivr.net/npm/d3-geo@3.1.1/+esm",
+  "topojson-client": "https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/+esm"
+} }
+</script>
+</head>
+<body class="voters-page">
+<main class="voters">
+  <div id="stage"></div>
+  <div id="loading">Loading map…</div>
+  <a class="back" href="./">← Explore the full map</a>
+  <section class="caption" id="caption" aria-live="polite"></section>
+  <div class="legend-dots" id="legend" aria-hidden="true"></div>
+  <div class="scalebar" id="scalebar" aria-hidden="true"><i></i><span></span></div>
+  <div class="player" id="player">
+    <button class="ghost" id="prev" aria-label="Previous scene">‹</button>
+    <button id="pause" aria-label="Pause">Pause</button>
+    <button class="ghost" id="next" aria-label="Next scene">›</button>
+    <div class="track" id="track" aria-hidden="true"><i id="fill"></i></div>
+  </div>
+</main>
+<script type="module" src="voters.js"></script>
+<script id="gc" data-goatcounter="https://texaslooksred.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
+</body>
+</html>

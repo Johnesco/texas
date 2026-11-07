@@ -1,0 +1,49 @@
+/* "See every single voter": a full-screen map that flies on its own, with a caption card for each scene. */
+.voters { position: relative; height: 100vh; height: 100svh; overflow: hidden; }
+#stage { position: absolute; inset: 0; }
+#stage canvas { display: block; }
+#loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 16px; }
+.back { position: absolute; top: 14px; left: 16px; font-size: 13px; color: var(--muted); text-decoration: none; z-index: 2; }
+.back:hover { color: var(--text); }
+
+.caption { position: absolute; left: 24px; top: 50%; transform: translateY(-50%); width: 380px; max-width: calc(100% - 32px);
+  background: rgba(21,26,34,.9); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; backdrop-filter: blur(6px);
+  transition: opacity .5s; }
+.caption.fade { opacity: 0; }
+.caption .kicker { font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--accent); font-weight: 650; margin-bottom: 6px; }
+.caption h1 { font-size: 30px; line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 10px; }
+.caption h2 { text-transform: none; color: var(--text); font-weight: 700; font-size: 21px; line-height: 1.2; letter-spacing: -0.01em; margin: 0 0 8px; }
+.caption p { margin: 0 0 8px; font-size: 15px; }
+.caption p:last-child { margin-bottom: 0; }
+.caption .big { font-size: 38px; font-weight: 750; letter-spacing: -0.02em; line-height: 1.05; color: var(--accent); margin: 2px 0 6px; }
+.caption .big small { display: block; font-size: 13px; font-weight: 500; letter-spacing: 0; color: var(--muted); margin-top: 3px; }
+.caption .vs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
+.caption .vs div { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 12.5px; color: var(--muted); }
+.caption .vs b { display: block; font-size: 20px; color: var(--text); }
+.caption .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.caption .links a { font-size: 14px; color: var(--accent); }
+.caption .d { color: #8fa8ff; font-weight: 650; } .caption .r { color: #ff8b8b; font-weight: 650; } .caption .o { color: #c2cad6; font-weight: 650; }
+.caption .note { font-size: 12.5px; color: var(--muted); }
+
+.legend-dots { position: absolute; top: 14px; right: 16px; display: flex; gap: 12px; font-size: 12px; color: var(--muted); }
+.legend-dots i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+.scalebar { position: absolute; right: 16px; bottom: 80px; font-size: 12px; color: var(--muted); text-align: right; transition: opacity .3s; }
+.scalebar i { display: block; height: 6px; border: 1.5px solid var(--muted); border-top: 0; margin: 0 0 3px auto; }
+
+.player { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px;
+  background: rgba(21,26,34,.88); border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px 7px 8px; backdrop-filter: blur(6px); }
+.player button { min-width: 80px; }
+.player button.ghost { min-width: 0; padding: 6px 13px; font-size: 18px; line-height: 1; }
+.track { width: 200px; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.track i { display: block; height: 100%; width: 0; background: var(--accent); }
+
+@media (max-width: 760px) {
+  .caption { left: 12px; right: 12px; top: auto; bottom: 74px; transform: none; width: auto; max-width: none; padding: 14px 16px; }
+  .caption h1 { font-size: 24px; }
+  .caption h2 { font-size: 18px; }
+  .caption p { font-size: 14px; }
+  .caption .big { font-size: 30px; }
+  .legend-dots { top: 38px; left: 16px; right: auto; }
+  .scalebar { top: 14px; bottom: auto; }
+  .track { width: 90px; }
+}

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { geoConicEqualArea, geoCentroid } from 'd3-geo';
 import { feature } from 'topojson-client';
+import { createDots, countyTris } from './dots.js';
 
 const GEO_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3.0.1/counties-10m.json';
 
@@ -151,7 +152,7 @@ function setRace(id) {
   finishRace();
 }
 function finishRace() {
-  try { history.replaceState(null, '', `?race=${race.id}`); } catch {}
+  try { history.replaceState(null, '', `?race=${race.id}${DOT ? `&dot=${DOT_PARAM}` : ''}`); } catch {}
   if (meshes.length) restyle();
 }
 
@@ -412,7 +413,29 @@ function outlineGeometry(shapes) {
 const labelsEl = document.getElementById('labels');
 let labeled = [], ready = false; // ready: camera + hover code below has been set up
 
+// ---------- dot view (?dot=N, experimental): one dot per N voters, default 1 ----------
+// Each county's voters are scattered at random inside the county (we only know votes by county, not where anyone lives),
+// colored by the party they voted for. Raised, the dots fill the county's column in the same stacking order as the
+// columns: runner-up at the bottom, others in the middle, winner on top. The column meshes stay in the scene, unpainted,
+// so hover and the labels work as before. Phones and tablets get one dot per 10 voters unless ?dot= asks for more than 1.
 const params = new URLSearchParams(location.search);
+const DOT_PARAM = params.get('dot');
+const DOT = DOT_PARAM !== null && DOT_PARAM !== '0';
+const DOT_PER = !DOT ? 0 : Math.max(1, Math.round(+DOT_PARAM) || 1) === 1 && matchMedia('(pointer: coarse)').matches ? 10
+  : Math.max(1, Math.round(+DOT_PARAM) || 1);
+const dots = DOT ? createDots() : null;
+let dotJob = 0, dotInfo = '';
+if (DOT) { edgeMat.opacity = 0.18; dots.uniforms.uWorld.value = 0; mapGroup.add(dots.points); }
+function requestDots() {
+  dotInfo = 'Placing dots…'; if (ready) updateMode();
+  const job = ++dotJob;
+  dots.place(meshes.map(m => m.userData), { per: DOT_PER, seed: 1 + races.indexOf(race) }).then(({ n }) => {
+    if (job !== dotJob) return;
+    dotInfo = `${fmt(n)} dots · 1 dot = ${DOT_PER === 1 ? '1 voter' : `${DOT_PER} voters`}`;
+    if (ready) updateMode();
+  });
+}
+
 setRace(params.get('race') || DEFAULT_RACE);
 if (params.get('race') && params.get('race') === race.id) gcEvent(`${HIST ? 'history-link/' : 'link/'}${race.id}`, `Arrived via link: ${race.year} ${race.label}`);
 
@@ -426,8 +449,9 @@ for (const f of tx.features) {
   });
   const g = new THREE.ExtrudeGeometry(shapes, { depth: 1, bevelEnabled: false });
   const edges = outlineGeometry(shapes);
+  if (DOT) c.tris = countyTris(shapes); // the county's area as triangles, for scattering its dots
   const seg = () => { // segments share the county's shape; each is scaled to its height and lifted into place
-    const m = new THREE.Mesh(g, [new THREE.MeshBasicMaterial(), new THREE.MeshLambertMaterial()]);
+    const m = new THREE.Mesh(g, [new THREE.MeshBasicMaterial({ visible: !DOT }), new THREE.MeshLambertMaterial({ visible: !DOT })]);
     m.add(new THREE.LineSegments(edges, edgeMat));
     m.userData = c; mapGroup.add(m); pickables.push(m);
     return m;
@@ -473,6 +497,7 @@ function restyle() {
   // rise order: smaller counties start a touch earlier, so the big cities rise last
   [...meshes].sort((a, b) => a.userData.total - b.userData.total)
     .forEach((m, i, arr) => m.userData.delay = 0.25 * i / arr.length);
+  if (DOT) requestDots();
   labelsEl.innerHTML = '';
   labeled = desc.slice(0, 8).map(c => {
     const el = document.createElement('div'); el.className = 'label';
@@ -531,6 +556,7 @@ function applyProgress(p, pose = null) {
     const k = ease(clamp01((p - 0.3 - u.delay) / 0.45));
     layout(u, H_FLAT + (u.target - H_FLAT) * k);
   }
+  if (DOT) dots.uniforms.uP.value = p;
   scrub.value = Math.round(p * 1000);
   playBtn.textContent = p > 0.5 ? 'Flatten' : 'See in 3D';
 }
@@ -545,10 +571,12 @@ function updateMode() {
     : raised ? 'Drag to orbit · right-drag to pan · scroll to zoom · hover over a county'
     : flat ? 'Drag to pan · scroll to zoom · hover over a county'
     : 'Hover over a county';
+  if (DOT) hintEl.textContent += ` · ${dotInfo}`;
 }
 function resize() {
   const w = stage.clientWidth, h = stage.clientHeight;
   renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+  if (DOT) { dots.uniforms.uViewH.value = h * renderer.getPixelRatio(); dots.uniforms.uMinSize.value = renderer.getPixelRatio(); }
   const t = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
   // map spans about ±500 units; fit it inside the padded area of the flat, top-down view
   PAD.top = Math.round(document.getElementById('races').getBoundingClientRect().height) + 26; // keep the map clear of the race selector
