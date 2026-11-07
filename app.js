@@ -129,7 +129,7 @@ function setRace(id) {
     `The flat map colors each county by who won it, no matter how many people voted there. A county where ${fmt(small.total)} votes were cast ` +
     `(${small.name}) is painted just as boldly as one where ${(big.total / 1e6).toFixed(2)} million were cast (${big.name}).`;
   $('raiseText').innerHTML =
-    `Press <b>Raise the counties</b> and each county becomes a column whose height is the number of votes cast there in the ${race.label} race. ` +
+    `Press <b>See in 3D</b> and each county becomes a column whose height is the number of votes cast there in the ${race.label} race. ` +
     `Most of the red area is land where few people vote, and the tallest columns are in the cities.`;
   let acc = 0, n = 0, accLand = 0;
   while (n < asc.length && acc + asc[n].total < big.total) { acc += asc[n].total; accLand += asc[n].landSqMi; n++; }
@@ -197,7 +197,7 @@ function renderChamber(nm) {
     `${race.label} seats are won district by district, and districts don't follow county lines: ${big.name} County had ` +
     `${big.districts} ${race.label} district races on its ballot, while District ${wide.district} spans ${wide.counties} counties. This map adds up every district's votes within each county.`;
   $('raiseText').innerHTML =
-    `Press <b>Raise the counties</b> and each county becomes a column whose height is the number of ${race.label} votes cast there. ` +
+    `Press <b>See in 3D</b> and each county becomes a column whose height is the number of ${race.label} votes cast there. ` +
     `${small.name} County cast ${fmt(small.total)}; ${big.name} County cast ${fmt(big.total)}.`;
   const close = [...race.districts].map(d => {
     const [a, b] = d.candidates; return { d, m: b ? (a.votes - b.votes) / d.total : 1, w: a };
@@ -245,7 +245,7 @@ function renderHistory(minor, nm) {
     `On the flat map every county is one block of color, whatever its size in votes: ${small.name} County cast ${fmt(small.total)} votes in this race ` +
     `and ${big.name} County cast ${fmt(big.total)}.`;
   $('raiseText').innerHTML =
-    `Press <b>Raise the counties</b> and each county becomes a column whose height is the number of votes cast there in this race. ` +
+    `Press <b>See in 3D</b> and each county becomes a column whose height is the number of votes cast there in this race. ` +
     `Every year on this page uses the same height scale, so the columns also show how turnout has changed.`;
   const big5 = desc.slice(0, 5), big5v = big5.reduce((s, c) => s + c.total, 0);
   let acc = 0, n = 0, accLand = 0;
@@ -532,7 +532,7 @@ function applyProgress(p, pose = null) {
     layout(u, H_FLAT + (u.target - H_FLAT) * k);
   }
   scrub.value = Math.round(p * 1000);
-  playBtn.textContent = p > 0.5 ? 'Flatten' : 'Raise the counties';
+  playBtn.textContent = p > 0.5 ? 'Flatten' : 'See in 3D';
 }
 // Flat view: drag pans. 3D view: drag orbits, right-drag pans. Both: scroll/pinch zooms.
 function updateMode() {
